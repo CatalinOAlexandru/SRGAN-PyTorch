@@ -13,6 +13,10 @@
 # ==============================================================================
 import logging
 import random
+import os
+import psutil
+import numpy as np
+import pandas as pd
 from argparse import ArgumentParser
 from os.path import join
 
@@ -23,12 +27,12 @@ from torch.nn import MSELoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from srgan_pytorch.dataset import BaseDataset
 from srgan_pytorch.loss import ContentLoss
 from srgan_pytorch.model import discriminator
-from srgan_pytorch.model import generator
+from srgan_pytorch.model import Generator
 from srgan_pytorch.utils import create_folder
 from test import iqa
 from test import sr
@@ -37,35 +41,36 @@ from test import sr
 logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
-parser = ArgumentParser()
-parser.add_argument("--dataroot", default="data/DIV2K/train",
+parserTrain = ArgumentParser()
+parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/train",
                     help="Path to dataset.")
-parser.add_argument("--p-epochs", default=512, type=int,
+parserTrain.add_argument("--p-epochs", default=512, type=int,
                     help="Number of total p-oral epochs to run. (Default: 512)")
-parser.add_argument("--g-epochs", default=128, type=int,
+parserTrain.add_argument("--g-epochs", default=128, type=int,
                     help="Number of total g-oral epochs to run. (Default: 128)")
-parser.add_argument("--batch-size", default=16, type=int,
+parserTrain.add_argument("--batch-size", default=16, type=int,
                     help="The batch size of the dataset. (Default: 16)")
-parser.add_argument("--p-lr", default=0.0001, type=float,
+parserTrain.add_argument("--p-lr", default=0.0001, type=float,
                     help="Learning rate for psnr-oral. (Default: 0.0001)")
-parser.add_argument("--g-lr", default=0.0001, type=float,
+parserTrain.add_argument("--g-lr", default=0.0001, type=float,
                     help="Learning rate for gan-oral. (Default: 0.0001)")
-parser.add_argument("--image-size", default=96, type=int,
+parserTrain.add_argument("--image-size", default=96, type=int,
                     help="Image size of high resolution image. (Default: 96)")
-parser.add_argument("--scale", default=4, type=int, choices=[4],
-                    help="Low to high resolution scaling factor. "
-                         "Optional: [4]. (Default: 4)")
-parser.add_argument("--netD", default="", type=str,
+parserTrain.add_argument("--scale", default=4, type=int,
+                    help="Low to high resolution scaling factor.")
+parserTrain.add_argument("--netD", default="", type=str,
                     help="Path to Discriminator checkpoint.")
-parser.add_argument("--netG", default="", type=str,
+parserTrain.add_argument("--netG", default="", type=str,
                     help="Path to Generator checkpoint.")
-parser.add_argument("--seed", default=None, type=int,
+parserTrain.add_argument("--name", default="DEF", type=str,
+                    help="Name for some folders")
+parserTrain.add_argument("--seed", default=None, type=int,
                     help="Seed for initializing training.")
-parser.add_argument("--pretrained", dest="pretrained", action="store_true",
+parserTrain.add_argument("--pretrained", dest="pretrained", action="store_true",
                     help="Use pre-trained model.")
-parser.add_argument("--cuda", dest="cuda", action="store_true",
+parserTrain.add_argument("--cuda", dest="cuda", action="store_true",
                     help="Enables cuda.")
-args = parser.parse_args()
+args = parserTrain.parse_args()
 
 # Random seed can ensure that the results of each training are inconsistent.
 if args.seed is None:
@@ -96,7 +101,7 @@ dataloader = DataLoader(dataset=dataset,
 
 # Load model.
 netD = discriminator().to(device)
-netG = generator(args.pretrained).to(device)
+netG = Generator(args.scale).to(device)
 
 # Optional: Resume training.
 start_p_epoch = 0
@@ -126,10 +131,6 @@ g_optim = Adam(netG.parameters(), args.g_lr, (0.9, 0.999))
 d_scheduler = StepLR(d_optim, args.g_epochs // 2, 0.1)
 g_scheduler = StepLR(g_optim, args.g_epochs // 2, 0.1)
 
-# Visualization. Use Tensorboard to record the Loss curve during training.
-p_writer = SummaryWriter("samples/psnr_logs")
-g_writer = SummaryWriter("samples/gan_logs")
-
 
 def main():
     # Use PSNR value as the image evaluation index in the process of training PSNR.
@@ -139,18 +140,29 @@ def main():
     best_psnr = 0.0
     best_ssim = 0.0
 
+    bestPSNRepoch = 0
+    bestGANepoch = 0
+
+    # to save statistics
+    # resultsP = {'p_loss': [], 'p_psnr': [], 'p_ssim': []}
+    pLoss = ['p_loss']
+    pPSNR = ['p_psnr']
+    pSSIM = ['p_ssim']
+
     # Train the PSNR stage of the generative model, and save the model weight
     # after reaching a certain index.
     for epoch in range(int(start_p_epoch), args.p_epochs):
         # Training.
-        train_psnr(epoch)
+        psnrLoss = train_psnr(epoch)
         # Test.
-        sr(netG, join("assets", "lr.png"), join("assets", "sr.png"))
-        psnr, ssim = iqa(join("assets", "sr.png"), join("assets", "hr.png"))
+        lrImg = 'lr_' + str(args.scale) + '.jpg'
+        sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
+        psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
         logger.info(f"P-Oral epoch {epoch} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
-        # Write result to TensorBoard.
-        p_writer.add_scalar("P_Test/PSNR", psnr, epoch)
-        p_writer.add_scalar("P_Test/SSIM", ssim, epoch)
+        # Write result.
+        pLoss.append(psnrLoss.cpu().item())
+        pPSNR.append(psnr)
+        pSSIM.append(ssim)
 
         # Check whether the PSNR value of the current epoch is the highest value
         # ever in the training PSNR phase.
@@ -158,28 +170,48 @@ def main():
         best_psnr = max(psnr, best_psnr)
         # Save the model once after each epoch. If the current PSNR value is the
         # highest, save another model ending with `best`.
-        torch.save(netG.state_dict(), join("weights", f"P_epoch{epoch}.pth"))
+        #torch.save(netG.state_dict(), join("weights",args.name, f"P_epoch{epoch}.pth"))
         if is_best:
-            torch.save(netG.state_dict(), join("weights", "P-best.pth"))
+            torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
+            print('[ BEST ] PSNR at epoch {}'.format(str(epoch)))
+            bestPSNRepoch = int(epoch)
 
     # Save the model weights of the last iteration of the PSNR stage.
-    torch.save(netG.state_dict(), join("weights", "P-last.pth"))
-    
-    # Load the model weights with the best results from the previous training.
-    netG.load_state_dict(torch.load(join("weights", "P-best.pth")))
+    torch.save(netG.state_dict(), join("weights",args.name, "P-last.pth"))
+
+    # out_path = 'stats/'
+    # data_frame_p = pd.DataFrame(
+    #     data={'Loss_P': resultsP['p_loss'], 'PSNR': resultsP['p_psnr'], 'SSIM': resultsP['p_ssim']},
+    #     index=range(1, args.p_epochs + 1))
+    # data_frame_p.to_csv(out_path + str(args.name)+'_' + str(args.scale) + '_P_results.csv', index_label='Epoch')
+
+    out_path = 'stats/' + str(args.name)+'_' + str(args.scale) + '_P_results.csv'
+    np.savetxt(out_path, np.dstack((np.arange(0, len(pLoss)),pLoss,pPSNR,pSSIM))[0],"%s,%s,%s,%s")
+    print('[ INFO ] PSNR Statistics saved.')
+
+
+    # resultsG = {'d_loss': [],'g_loss': [], 'g_psnr': [], 'g_ssim': []}
+    dLoss = ['d_loss']
+    gLoss = ['g_loss']
+    gPSNR = ['g_psnr']
+    gSSIM = ['g_ssim']
 
     # Train the generative model in the GAN stage and save the model weight after
     # reaching a certain index.
+    # saveEpochs = [25,50,75,100,120]
     for epoch in range(int(start_g_epoch), args.g_epochs):
         # Training.
-        train_gan(epoch)
+        allLossD,allLossG = train_gan(epoch)
         # Test.
-        sr(netG, join("assets", "lr.png"), join("assets", "sr.png"))
-        psnr, ssim = iqa(join("assets", "sr.png"), join("assets", "hr.png"))
+        lrImg = 'lr_' + str(args.scale) + '.jpg'
+        sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
+        psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
         logger.info(f"G-Oral epoch {epoch} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
-        # Write result to TensorBoard.
-        p_writer.add_scalar("G_Test/PSNR", psnr, epoch)
-        p_writer.add_scalar("G_Test/SSIM", ssim, epoch)
+        # Write result
+        dLoss.append(allLossD.cpu().item())
+        gLoss.append(allLossG.cpu().item())
+        gPSNR.append(psnr)
+        gSSIM.append(ssim)
 
         # Check whether the PSNR value of the current epoch is the highest value
         # in the history of the training GAN stage.
@@ -187,11 +219,14 @@ def main():
         best_ssim = max(ssim, best_ssim)
         # Save the model once after each epoch, if the current PSNR value is the
         # highest, save another model ending with `best`.
-        torch.save(netD.state_dict(), join("weights", f"D_epoch{epoch}.pth"))
-        torch.save(netG.state_dict(), join("weights", f"G_epoch{epoch}.pth"))
+        #torch.save(netD.state_dict(), join("weights",args.name, f"D_epoch{epoch}.pth"))
+        # if epoch in saveEpochs:
+        #     torch.save(netG.state_dict(), join("weights",args.name, f"G_epoch{epoch}.pth"))
         if is_best:
-            torch.save(netD.state_dict(), join("weights", "D-best.pth"))
-            torch.save(netG.state_dict(), join("weights", "G-best.pth"))
+            torch.save(netD.state_dict(), join("weights",args.name, "D-best.pth"))
+            torch.save(netG.state_dict(), join("weights",args.name, "G-best.pth"))
+            print('[ BEST ] GAN at epoch {}'.format(str(epoch)))
+            bestGANepoch = int(epoch)
 
         # Call the scheduler function to adjust the learning rate of the
         # generator model and the discrimination model.
@@ -199,13 +234,26 @@ def main():
         g_scheduler.step()
 
     # Save the model weights of the last iteration of the GAN stage.
-    torch.save(netG.state_dict(), join("weights", "G-last.pth"))
+    torch.save(netG.state_dict(), join("weights",args.name, "G-last.pth"))
+
+    print('[ BEST ] PSNR was at epoch {}'.format(bestPSNRepoch))
+    print('[ BEST ] GAN was at epoch {}'.format(bestGANepoch))
+
+    # data_frame_g = pd.DataFrame(
+    #     data={'Loss_D': resultsG['d_loss'], 'Loss_G': resultsG['g_loss'], 'PSNR': resultsG['g_psnr'], 'SSIM': resultsG['g_ssim']},
+    #     index=range(1, args.g_epochs + 1))
+    # data_frame_g.to_csv(out_path + str(args.name)+'_' + str(args.scale) + '_G_train.csv', index_label='Epoch')
+
+    out_path = 'stats/' + str(args.name)+'_' + str(args.scale) + '_G_results.csv'
+    np.savetxt(out_path, np.dstack((np.arange(0, len(dLoss)),dLoss,gLoss,gPSNR,gSSIM))[0],"%s,%s,%s,%s,%s")
+    print('[ INFO ] GAN Statistics saved.')
 
 
 def train_psnr(epoch):
     num_batches = len(dataloader)
+    allLoss = []
     for index, data in enumerate(dataloader, 1):
-        # 将数据拷贝至指定设备当中.
+        
         inputs, target = data[0].to(device), data[1].to(device)
 
         ##############################################
@@ -215,18 +263,21 @@ def train_psnr(epoch):
         output = netG(inputs)
         loss = pixel_criterion(output, target)
         loss.backward()
+        allLoss.append(loss)
         p_optim.step()
 
-        logger.info(f"Epoch[{epoch}/{args.p_epochs}]"
+        logger.info(f"Epoch[{epoch+1}/{args.p_epochs}]"
                     f"({index}/{num_batches}) P Loss: {loss.item():.4f}.")
 
         # Write the loss value during PSNR training into Tensorboard.
         batches = index + epoch * num_batches + 1
-        p_writer.add_scalar("Train/P_Loss", loss.item(), batches)
+    return (sum(allLoss) / len(allLoss))
 
 
 def train_gan(epoch):
     num_batches = len(dataloader)
+    allLossD = []
+    allLossG = []
     for index, data in enumerate(dataloader, 1):
         # Copy the data to the designated device.
         inputs, target = data[0].to(device), data[1].to(device)
@@ -261,20 +312,26 @@ def train_gan(epoch):
         g_loss.backward()
         g_optim.step()
 
-        logger.info(f"Epoch[{epoch}/{args.g_epochs}]"
+        logger.info(f"Epoch[{epoch+1}/{args.g_epochs}]"
                     f"({index}/{num_batches}) "
                     f"D Loss: {d_loss.item():.4f} "
                     f"G Loss: {g_loss.item():.4f}.")
 
         # Write the loss value during GAN training into Tensorboard.
-        batches = index + epoch * num_batches + 1
-        g_writer.add_scalar("Train/D_Loss", d_loss.item(), batches)
-        g_writer.add_scalar("Train/G_Loss", g_loss.item(), batches)
+        allLossD.append(d_loss)
+        allLossG.append(g_loss)
+
+    allLossD = (sum(allLossD) / len(allLossD))
+    allLossG = (sum(allLossG) / len(allLossG))
+    return allLossD,allLossG
 
 
 if __name__ == "__main__":
-    create_folder("weights")
-    create_folder("samples")
+    # create_folder("weights")
+    create_folder(os.path.join("weights", args.name))
+    create_folder(os.path.join("assets", args.name))
+    # create_folder("stats")
+    # create_folder(os.path.join("stats", args.name))
 
     logger.info("TrainEngine:")
     logger.info("\tAPI version .......... 0.4.0")
