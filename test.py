@@ -11,9 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
+
+# crop 4
+# python3 test.py --model-path '/home/calexand/SRGAN-PyTorch/weights/G-best.pth' --test-path-lr '/home/calexand/datasets/histo_split_4/crop_4/data' --test-path-hr '/home/calexand/datasets/histo_split_4/crop_4/target' --name 'Crop4' --cuda
+# full 4
+# python3 test.py --model-path '/home/calexand/SRGAN-PyTorch/weights/G-best.pth' --test-path-lr '/home/calexand/datasets/histo_split_4/full_4/data' --test-path-hr '/home/calexand/datasets/histo_split_4/full_4/target' --name 'Full4' --cuda
+
+print('Starting...')
+
 import logging
 import os
 from argparse import ArgumentParser
+import matplotlib.pyplot as plt 
 
 import torch
 from PIL import Image
@@ -24,21 +33,25 @@ from skimage.metrics import structural_similarity
 from torchvision.transforms import ToTensor
 from torchvision.utils import save_image
 
-from srgan_pytorch.model import generator
+from srgan_pytorch.model import Generator
 from srgan_pytorch.utils import create_folder
 
 # It is a convenient method for simple scripts to configure the log package at one time.
 logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
-parser = ArgumentParser()
-parser.add_argument("--pretrained", dest="pretrained", action="store_true",
-                    help="Use pre-trained model.")
-parser.add_argument("--model-path", default="", type=str,
-                    help="Path to latest checkpoint for model.")
-parser.add_argument("--cuda", dest="cuda", action="store_true",
-                    help="Enables cuda.")
-args = parser.parse_args()
+parserTest = ArgumentParser()
+parserTest.add_argument("--pretrained", dest="pretrained", action="store_true", help="Use pre-trained model.")
+parserTest.add_argument("--model-path", default="", type=str, help="Path to latest checkpoint for model.")
+parserTest.add_argument("--test-path-lr", default="data/Set14/LRbicx4", type=str, help="Path to test images")
+parserTest.add_argument("--test-path-hr", default="data/Set14/GTmod12", type=str, help="Path to test images")
+parserTest.add_argument("--p-epochs", default=512, type=int,help="Number of total p-oral epochs to run. (Default: 512)")
+parserTest.add_argument("--g-epochs", default=128, type=int,help="Number of total g-oral epochs to run. (Default: 128)")
+parserTest.add_argument("--scale-factor", default=4, type=int, help="Scale Factor for image")
+parserTest.add_argument("--batch-size", default=16, type=int,help="The batch size of the dataset. (Default: 16)")
+parserTest.add_argument("--name", default="DEF", type=str, help="Name for test folder")
+parserTest.add_argument("--cuda", dest="cuda", action="store_true", help="Enables cuda.")
+args = parserTest.parse_args()
 
 # Set whether to use CUDA.
 device = torch.device("cuda:0" if args.cuda else "cpu")
@@ -72,9 +85,28 @@ def iqa(sr_filename, hr_filename):
     sr_image = imread(sr_filename)
     hr_image = imread(hr_filename)
 
+    srSize = sr_image.shape[0]
+    hrSize = hr_image.shape[0]
+
     # Delete 4 pixels around the image to facilitate PSNR calculation.
-    sr_image = sr_image[4:-4, 4:-4, ...]
-    hr_image = hr_image[4:-4, 4:-4, ...]
+    if(srSize == hrSize):
+        sr_image = sr_image[4:-4, 4:-4, ...]
+        hr_image = hr_image[4:-4, 4:-4, ...]
+    elif(srSize > hrSize):
+        diff = srSize - hrSize
+        if diff == 8:
+            # images wont be pixel perfect as they are no longer symetric however
+            # PSNR should do fine to see similarities
+            sr_image = sr_image[4:-4, 4:-4, ...]
+        else:
+            raise Exception("Difference between SR and HR is not 8. Fix the math.")
+    else:
+        diff = hrSize - srSize # swapped these 2
+        if diff == 8:
+            # same as above
+            hr_image = hr_image[4:-4, 4:-4, ...]
+        else:
+            raise Exception("Difference between SR and HR is not 8. Fix the math.")
 
     # Calculate the Y channel of the image. Use the Y channel to calculate PSNR
     # and SSIM instead of using RGB three channels.
@@ -87,6 +119,8 @@ def iqa(sr_filename, hr_filename):
     sr_image = sr_image / 255.0
     hr_image = hr_image / 255.0
 
+    print('sr image',sr_image.shape)
+    print('hr image',hr_image.shape)
     psnr = peak_signal_noise_ratio(sr_image, hr_image)
     ssim = structural_similarity(sr_image,
                                  hr_image,
@@ -101,24 +135,63 @@ def iqa(sr_filename, hr_filename):
     return psnr, ssim
 
 
+def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim):
+    lr_image = imread(lr_filename)
+    sr_image = imread(sr_filename)
+    hr_image = imread(hr_filename)
+
+    cropSize = 50 # 50 in each direction, therefore 100x100 zoom image
+    sf = args.scale_factor # scale factor
+
+    fig, axs = plt.subplots(2, 3)
+    name = 'PSNR: ' + str(round(psnr,2)) + " | SSIM: " + str(round(ssim,2))
+    fig.suptitle(name)
+    lrsize = int(lr_image.shape[0]/2)
+    srsize = int(sr_image.shape[0]/2)
+
+    axs[0,0].imshow(lr_image[lrsize-cropSize:lrsize+cropSize, lrsize-cropSize:lrsize+cropSize, :])
+    axs[0,0].set_title('Low Res')
+    axs[0,0].axis('off')
+    axs[0,1].imshow(sr_image[srsize-(cropSize*sf):srsize+(cropSize*sf), srsize-(cropSize*sf):srsize+(cropSize*sf), :])
+    axs[0,1].set_title('Super Res')
+    axs[0,1].axis('off')
+    axs[0,2].imshow(hr_image[srsize-(cropSize*sf):srsize+(cropSize*sf), srsize-(cropSize*sf):srsize+(cropSize*sf), :])
+    axs[0,2].set_title('Ground Truth')
+    axs[0,2].axis('off')
+    axs[1,0].imshow(lr_image)
+    axs[1,0].axis('off')
+    axs[1,1].imshow(sr_image)
+    axs[1,1].axis('off')
+    axs[1,2].imshow(hr_image)
+    axs[1,2].axis('off')
+    plt.tight_layout()
+
+    namePath = os.path.join("tests", args.name, 'figs',filename)
+    fig.savefig(namePath,dpi=300)
+    plt.close()
+
+
+
 def main():
     # Initialize the image quality evaluation index.
     avg_psnr = 0.0
     avg_ssim = 0.0
 
     # Load model and weights.
-    model = generator(args.pretrained).to(device).eval()
+    model = Generator(args.scale_factor).to(device).eval()
     if args.model_path != "":
         logger.info(f"Loading weights from `{args.model_path}`.")
         model.load_state_dict(torch.load(args.model_path))
 
     # Get test image file index.
-    filenames = os.listdir(os.path.join("data", "Set5", "LRbicx4"))
+    filenames = os.listdir(os.path.join(args.test_path_lr))
 
     for index in range(len(filenames)):
-        lr_filename = os.path.join("data", "Set5", "LRbicx4", filenames[index])
-        sr_filename = os.path.join("tests", "Set5", filenames[index])
-        hr_filename = os.path.join("data", "Set5", "GTmod12", filenames[index])
+        print("Image {}/{}".format(index+1,len(filenames)))
+
+        lr_filename = os.path.join(args.test_path_lr, filenames[index])
+        sr_filename = os.path.join("tests", args.name, filenames[index])
+        hr_filename = os.path.join(args.test_path_hr, filenames[index])
 
         # Process low-resolution images into super-resolution images.
         sr(model, lr_filename, sr_filename)
@@ -128,6 +201,9 @@ def main():
         psnr, ssim = iqa(sr_filename, hr_filename)
         avg_psnr += psnr
         avg_ssim += ssim
+
+        saveZoomImages(lr_filename,sr_filename,hr_filename,filenames[index],psnr,ssim)
+
 
     # Calculate the average index value of the image quality of the test dataset.
     avg_psnr = avg_psnr / len(filenames)
@@ -139,7 +215,8 @@ def main():
 
 if __name__ == "__main__":
     create_folder("tests")
-    create_folder(os.path.join("tests", "Set5"))
+    create_folder(os.path.join("tests", args.name))
+    create_folder(os.path.join("tests", args.name, "figs"))
 
     logger.info("TrainEngine:")
     logger.info("\tAPI version .......... 0.4.0")
