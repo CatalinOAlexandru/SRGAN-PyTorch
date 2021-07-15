@@ -327,15 +327,15 @@ def train_gan(epoch):
 
 
 if __name__ == "__main__":
-    # create_folder("weights")
+    create_folder("weights")
     create_folder(os.path.join("weights", args.name))
     create_folder(os.path.join("assets", args.name))
-    # create_folder("stats")
-    # create_folder(os.path.join("stats", args.name))
+    create_folder("stats")
 
-    logger.info("TrainEngine:")
-    logger.info("\tAPI version .......... 0.4.0")
-    logger.info("\tBuild ................ 2021.07.09")
+    logger.info("Train Engine:")
+    logger.info("\tAPI version .......... 0.4.1")
+    logger.info("\tBuild ................ 2021.07.15")
+    logger.info("\tModified by Catalin Alexndru")
 
     main()
 

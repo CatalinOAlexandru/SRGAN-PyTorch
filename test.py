@@ -218,9 +218,10 @@ if __name__ == "__main__":
     create_folder(os.path.join("tests", args.name))
     create_folder(os.path.join("tests", args.name, "figs"))
 
-    logger.info("TrainEngine:")
-    logger.info("\tAPI version .......... 0.4.0")
-    logger.info("\tBuild ................ 2021.07.09")
+    logger.info("Train Engine:")
+    logger.info("\tAPI version .......... 0.4.1")
+    logger.info("\tBuild ................ 2021.07.15")
+    logger.info("\tModified by Catalin Alexndru")
 
     main()
 
