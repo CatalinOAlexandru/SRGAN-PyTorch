@@ -11,14 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+print('Importing...')
 import logging
 import random
 import os
+import sys
 import psutil
 import numpy as np
 import pandas as pd
 from argparse import ArgumentParser
 from os.path import join
+
+import warnings
+warnings.simplefilter("ignore", UserWarning)
 
 import torch
 from torch.backends import cudnn
@@ -27,22 +32,27 @@ from torch.nn import MSELoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-# from torch.utils.tensorboard import SummaryWriter
 
 from srgan_pytorch.dataset import BaseDataset
 from srgan_pytorch.loss import ContentLoss
-from srgan_pytorch.model import discriminator
+from srgan_pytorch.model import Discriminator
 from srgan_pytorch.model import Generator
 from srgan_pytorch.utils import create_folder
-from test import iqa
-from test import sr
 
+from PIL import Image
+from skimage.color import rgb2ycbcr
+from skimage.io import imread
+from skimage.metrics import peak_signal_noise_ratio
+from skimage.metrics import structural_similarity
+from torchvision.transforms import ToTensor
+from torchvision.utils import save_image
+print('Parameters...')
 # It is a convenient method for simple scripts to configure the log package at one time.
 logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
 parserTrain = ArgumentParser()
-parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/train",
+parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/only_val",
                     help="Path to dataset.")
 parserTrain.add_argument("--p-epochs", default=512, type=int,
                     help="Number of total p-oral epochs to run. (Default: 512)")
@@ -72,6 +82,11 @@ parserTrain.add_argument("--cuda", dest="cuda", action="store_true",
                     help="Enables cuda.")
 args = parserTrain.parse_args()
 
+if ((args.image_size / args.scale)%1) != 0:
+    sys.exit('The image size is not correctly divizible by the scale.')
+if ((args.image_size / 16)%1) != 0:
+    sys.exit('The image size is not correctly divizible by 16.')
+
 # Random seed can ensure that the results of each training are inconsistent.
 if args.seed is None:
     args.seed = random.randint(1, 10000)
@@ -88,8 +103,11 @@ cudnn.benchmark = True
 if torch.cuda.is_available() and not args.cuda:
     logger.warning("You have a CUDA device, so you should probably "
                    "run with --cuda")
-device = torch.device("cuda:0" if args.cuda else "cpu")
 
+device = torch.device("cuda:0" if args.cuda else "cpu")
+print('Using device:',device)
+
+print('Loading Dataset...')
 # Load dataset.
 dataset = BaseDataset(dataroot=args.dataroot,
                       image_size=args.image_size,
@@ -99,8 +117,9 @@ dataloader = DataLoader(dataset=dataset,
                         shuffle=True,
                         pin_memory=True)
 
+print('Loading model...')
 # Load model.
-netD = discriminator().to(device)
+netD = Discriminator(args.image_size).to(device)
 netG = Generator(args.scale).to(device)
 
 # Optional: Resume training.
@@ -131,6 +150,7 @@ g_optim = Adam(netG.parameters(), args.g_lr, (0.9, 0.999))
 d_scheduler = StepLR(d_optim, args.g_epochs // 2, 0.1)
 g_scheduler = StepLR(g_optim, args.g_epochs // 2, 0.1)
 
+print('Starting...')
 
 def main():
     # Use PSNR value as the image evaluation index in the process of training PSNR.
@@ -157,7 +177,10 @@ def main():
         # Test.
         lrImg = 'lr_' + str(args.scale) + '.jpg'
         sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
-        psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
+        if args.scale > 15:
+            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr_extra.jpg"))
+        else:
+            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
         logger.info(f"P-Oral epoch {epoch} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
         # Write result.
         pLoss.append(psnrLoss.cpu().item())
@@ -172,9 +195,10 @@ def main():
         # highest, save another model ending with `best`.
         #torch.save(netG.state_dict(), join("weights",args.name, f"P_epoch{epoch}.pth"))
         if is_best:
-            torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
-            print('[ BEST ] PSNR at epoch {}'.format(str(epoch)))
+            print('[ BEST ] PSNR at epoch {} with best PSNR {}'.format(str(epoch),best_psnr))
             bestPSNRepoch = int(epoch)
+            torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
+            
 
     # Save the model weights of the last iteration of the PSNR stage.
     torch.save(netG.state_dict(), join("weights",args.name, "P-last.pth"))
@@ -187,7 +211,7 @@ def main():
 
     out_path = 'stats/' + str(args.name)+'_' + str(args.scale) + '_P_results.csv'
     np.savetxt(out_path, np.dstack((np.arange(0, len(pLoss)),pLoss,pPSNR,pSSIM))[0],"%s,%s,%s,%s")
-    print('[ INFO ] PSNR Statistics saved.')
+    # print('[ INFO ] PSNR Statistics saved.')
 
 
     # resultsG = {'d_loss': [],'g_loss': [], 'g_psnr': [], 'g_ssim': []}
@@ -198,14 +222,17 @@ def main():
 
     # Train the generative model in the GAN stage and save the model weight after
     # reaching a certain index.
-    # saveEpochs = [25,50,75,100,120]
+    saveEpochs = [10,25,40,50]
     for epoch in range(int(start_g_epoch), args.g_epochs):
         # Training.
         allLossD,allLossG = train_gan(epoch)
         # Test.
         lrImg = 'lr_' + str(args.scale) + '.jpg'
         sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
-        psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
+        if args.scale > 15:
+            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr_extra.jpg"))
+        else:
+            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
         logger.info(f"G-Oral epoch {epoch} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
         # Write result
         dLoss.append(allLossD.cpu().item())
@@ -220,24 +247,25 @@ def main():
         # Save the model once after each epoch, if the current PSNR value is the
         # highest, save another model ending with `best`.
         #torch.save(netD.state_dict(), join("weights",args.name, f"D_epoch{epoch}.pth"))
-        # if epoch in saveEpochs:
-        #     torch.save(netG.state_dict(), join("weights",args.name, f"G_epoch{epoch}.pth"))
+        if epoch in saveEpochs:
+            torch.save(netG.state_dict(), join("weights",args.name, f"G_epoch{epoch}.pth"))
         if is_best:
+            print('[ BEST ] GAN at epoch {} with SSIM {}'.format(str(epoch),best_ssim))
+            bestGANepoch = int(epoch)
             torch.save(netD.state_dict(), join("weights",args.name, "D-best.pth"))
             torch.save(netG.state_dict(), join("weights",args.name, "G-best.pth"))
-            print('[ BEST ] GAN at epoch {}'.format(str(epoch)))
-            bestGANepoch = int(epoch)
 
         # Call the scheduler function to adjust the learning rate of the
         # generator model and the discrimination model.
         d_scheduler.step()
         g_scheduler.step()
 
-    # Save the model weights of the last iteration of the GAN stage.
-    torch.save(netG.state_dict(), join("weights",args.name, "G-last.pth"))
 
     print('[ BEST ] PSNR was at epoch {}'.format(bestPSNRepoch))
     print('[ BEST ] GAN was at epoch {}'.format(bestGANepoch))
+
+    # Save the model weights of the last iteration of the GAN stage.
+    torch.save(netG.state_dict(), join("weights",args.name, "G-last.pth"))    
 
     # data_frame_g = pd.DataFrame(
     #     data={'Loss_D': resultsG['d_loss'], 'Loss_G': resultsG['g_loss'], 'PSNR': resultsG['g_psnr'], 'SSIM': resultsG['g_ssim']},
@@ -246,7 +274,7 @@ def main():
 
     out_path = 'stats/' + str(args.name)+'_' + str(args.scale) + '_G_results.csv'
     np.savetxt(out_path, np.dstack((np.arange(0, len(dLoss)),dLoss,gLoss,gPSNR,gSSIM))[0],"%s,%s,%s,%s,%s")
-    print('[ INFO ] GAN Statistics saved.')
+    # print('[ INFO ] GAN Statistics saved.')
 
 
 def train_psnr(epoch):
@@ -261,6 +289,8 @@ def train_psnr(epoch):
         ##############################################
         netG.zero_grad()
         output = netG(inputs)
+        # print('Output shape',output.shape)
+        # print('Target shape',target.shape)
         loss = pixel_criterion(output, target)
         loss.backward()
         allLoss.append(loss)
@@ -294,9 +324,17 @@ def train_gan(epoch):
         ##############################################
         netD.zero_grad()
         fake = netG(inputs)
+        # print('target is:',target.shape)
+        # print('fake is:',fake.shape)
+        # print('real_label is:',real_label)
+        # print('fake_label is:',fake_label)
         d_loss_real = adv_criterion(netD(target), real_label)
         d_loss_fake = adv_criterion(netD(fake.detach()), fake_label)
+        # d_loss = torch.tensor([0], dtype=torch.float)
         d_loss = d_loss_real + d_loss_fake
+        # print('d_loss_real is:',d_loss_real)
+        # print('d_loss_fake is:',d_loss_fake)
+        # print('d_loss is:',d_loss)
         d_loss.backward()
         d_optim.step()
 
@@ -326,16 +364,79 @@ def train_gan(epoch):
     return allLossD,allLossG
 
 
+def sr(model, lr_filename, sr_filename):
+    r""" Turn low resolution into super resolution.
+
+    Args:
+        model (torch.nn.Module): SR model.
+        lr_filename (str): Low resolution image address.
+        sr_filename (srt): Super resolution image address.
+    """
+    with torch.no_grad():
+        lr = Image.open(lr_filename).convert("RGB")
+        lr_tensor = ToTensor()(lr).unsqueeze(0).to(device)
+        sr_tensor = model(lr_tensor)
+        save_image(sr_tensor.detach(), sr_filename, normalize=True)
+
+
+def iqa(sr_filename, hr_filename):
+    r""" Image quality evaluation function.
+
+    Args:
+        sr_filename (str): Super resolution image address.
+        hr_filename (srt): High resolution image address.
+
+    Returns:
+        PSNR value(float), SSIM value(float).
+    """
+    sr_image = imread(sr_filename)
+    hr_image = imread(hr_filename)
+
+    srSize = sr_image.shape[0]
+    hrSize = hr_image.shape[0]
+
+    # Delete 4 pixels around the image to facilitate PSNR calculation.
+    if(srSize == hrSize):
+        sr_image = sr_image[4:-4, 4:-4, ...]
+        hr_image = hr_image[4:-4, 4:-4, ...]
+    else:
+        raise Exception("Difference between SR and HR sizes. Should be equal.")
+
+    # Calculate the Y channel of the image. Use the Y channel to calculate PSNR
+    # and SSIM instead of using RGB three channels.
+    sr_image = sr_image / 255.0
+    hr_image = hr_image / 255.0
+    sr_image = rgb2ycbcr(sr_image)[:, :, 0:1]
+    hr_image = rgb2ycbcr(hr_image)[:, :, 0:1]
+    # Because rgb2ycbcr() outputs a floating point type and the range is [0, 255],
+    # it needs to be renormalized to [0, 1].
+    sr_image = sr_image / 255.0
+    hr_image = hr_image / 255.0
+
+    psnr = peak_signal_noise_ratio(sr_image, hr_image)
+    ssim = structural_similarity(sr_image,
+                                 hr_image,
+                                 win_size=11,
+                                 gaussian_weights=True,
+                                 multichannel=True,
+                                 data_range=1.0,
+                                 K1=0.01,
+                                 K2=0.03,
+                                 sigma=1.5)
+
+    return psnr, ssim
+
+
 if __name__ == "__main__":
-    create_folder("weights")
+    # create_folder("weights")
     create_folder(os.path.join("weights", args.name))
     create_folder(os.path.join("assets", args.name))
-    create_folder("stats")
+    # create_folder("stats")
+    # create_folder(os.path.join("stats", args.name))
 
-    logger.info("Train Engine:")
-    logger.info("\tAPI version .......... 0.4.1")
-    logger.info("\tBuild ................ 2021.07.15")
-    logger.info("\tModified by Catalin Alexndru")
+    logger.info("TrainEngine:")
+    logger.info("\tAPI version .......... 0.4.0")
+    logger.info("\tBuild ................ 2021.07.09")
 
     main()
 
