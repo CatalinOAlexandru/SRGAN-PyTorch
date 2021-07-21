@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
 parserTrain = ArgumentParser()
-parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/only_val",
+parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/train",
                     help="Path to dataset.")
 parserTrain.add_argument("--p-epochs", default=512, type=int,
                     help="Number of total p-oral epochs to run. (Default: 512)")
