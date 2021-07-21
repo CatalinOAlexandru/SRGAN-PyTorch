@@ -74,8 +74,14 @@ class SubpixelConvolutionLayer(nn.Module):
 
 class Discriminator(nn.Module):
 
-    def __init__(self):
+    def __init__(self,imgSize):
+        # as from the original implementation it fixes some differences in sizes
+        # which were initially hard coded for 96x96 image size. classfieierAdaption
+        # will allow for all kind of image sizes without affecting the training.
+        classifierAdaption = int((imgSize/16)**2)
+
         super(Discriminator, self).__init__()
+
         self.features = nn.Sequential(
             # input size. (3) x 96 x 96
             nn.Conv2d(3, 64, 3, 1, 1),
@@ -108,7 +114,7 @@ class Discriminator(nn.Module):
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 6 * 6, 1024),
+            nn.Linear(512 * classifierAdaption, 1024),
             nn.LeakyReLU(0.2, True),
             nn.Linear(1024, 1),
             nn.Sigmoid()
@@ -117,10 +123,15 @@ class Discriminator(nn.Module):
         # Init all model weights.
         self._initialize_weights()
 
+
     def forward(self, x):
+        # print('Discriminator input',x.shape)
         out = self.features(x)
+        # print('Discriminator after features',out.shape)
         out = torch.flatten(out, 1)
+        # print('Discriminator after flatten',out.shape)
         out = self.classifier(out)
+        # print('Discriminator after classifier',out.shape)
 
         return out
 
@@ -175,12 +186,18 @@ class Generator(nn.Module):
         self._initialize_weights()
 
     def forward(self, x):
+        # print('Generator input',x.shape)
         conv1 = self.conv1(x)
+        # print('Generator conv1',conv1.shape)
         trunk = self.trunk(conv1)
+        # print('Generator trunk',trunk.shape)
         conv2 = self.conv2(trunk)
+        # print('Generator conv2',conv2.shape)
         out = conv1 + conv2
         out = self.subpixel_conv(out)
+        # print('Generator subpixel_conv',out.shape)
         out = self.conv3(out)
+        # print('Generator conv3/out',out.shape)
 
         return out
 
@@ -197,15 +214,15 @@ class Generator(nn.Module):
 
 
 
-def discriminator() -> Discriminator:
-    r"""Build discriminator model from the <https://arxiv.org/abs/1609.04802>` paper.
+# def discriminator() -> Discriminator:
+#     r"""Build discriminator model from the <https://arxiv.org/abs/1609.04802>` paper.
 
-    Returns:
-        torch.nn.Module.
-    """
-    model = Discriminator()
+#     Returns:
+#         torch.nn.Module.
+#     """
+#     model = Discriminator()
 
-    return model
+#     return model
 
 
 # def generator(pretrained: bool = False, progress: bool = True, up_scale: int) -> Generator:
