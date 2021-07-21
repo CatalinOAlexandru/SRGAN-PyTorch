@@ -11,6 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+
+# Modified by ... Catalin Alexandru
+# On ................... 2021.07.21
+
+# ==============================================================================
+
 import torch
 import math
 from torch import nn

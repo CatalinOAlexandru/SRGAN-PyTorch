@@ -437,6 +437,8 @@ if __name__ == "__main__":
     logger.info("TrainEngine:")
     logger.info("\tAPI version .......... 0.4.0")
     logger.info("\tBuild ................ 2021.07.09")
+    logger.info("\tModified by ... Catalin Alexandru")
+    logger.info("\tOn ................... 2021.07.21")
 
     main()
 
