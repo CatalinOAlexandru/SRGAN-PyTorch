@@ -17,7 +17,7 @@
 # full 4
 # python3 test.py --model-path '/home/calexand/SRGAN-PyTorch/weights/G-best.pth' --test-path-lr '/home/calexand/datasets/histo_split_4/full_4/data' --test-path-hr '/home/calexand/datasets/histo_split_4/full_4/target' --name 'Full4' --cuda
 
-print('Starting...')
+print('Starting Testing...')
 
 import logging
 import os
@@ -55,6 +55,7 @@ args = parserTest.parse_args()
 
 # Set whether to use CUDA.
 device = torch.device("cuda:0" if args.cuda else "cpu")
+print('Using device:',device)
 
 
 def sr(model, lr_filename, sr_filename):
@@ -92,21 +93,23 @@ def iqa(sr_filename, hr_filename):
     if(srSize == hrSize):
         sr_image = sr_image[4:-4, 4:-4, ...]
         hr_image = hr_image[4:-4, 4:-4, ...]
-    elif(srSize > hrSize):
-        diff = srSize - hrSize
-        if diff == 8:
-            # images wont be pixel perfect as they are no longer symetric however
-            # PSNR should do fine to see similarities
-            sr_image = sr_image[4:-4, 4:-4, ...]
-        else:
-            raise Exception("Difference between SR and HR is not 8. Fix the math.")
     else:
-        diff = hrSize - srSize # swapped these 2
-        if diff == 8:
-            # same as above
-            hr_image = hr_image[4:-4, 4:-4, ...]
-        else:
-            raise Exception("Difference between SR and HR is not 8. Fix the math.")
+        raise Exception("Difference between SR and HR sizes. Should be equal.")
+    # elif(srSize > hrSize):
+    #     diff = srSize - hrSize
+    #     if diff == 8:
+    #         # images wont be pixel perfect as they are no longer symetric however
+    #         # PSNR should do fine to see similarities
+    #         sr_image = sr_image[4:-4, 4:-4, ...]
+    #     else:
+    #         raise Exception("Difference between SR and HR is not 8. Fix the math.")
+    # else:
+    #     diff = hrSize - srSize # swapped these 2
+    #     if diff == 8:
+    #         # same as above
+    #         hr_image = hr_image[4:-4, 4:-4, ...]
+    #     else:
+    #         raise Exception("Difference between SR and HR is not 8. Fix the math.")
 
     # Calculate the Y channel of the image. Use the Y channel to calculate PSNR
     # and SSIM instead of using RGB three channels.
@@ -119,8 +122,6 @@ def iqa(sr_filename, hr_filename):
     sr_image = sr_image / 255.0
     hr_image = hr_image / 255.0
 
-    print('sr image',sr_image.shape)
-    print('hr image',hr_image.shape)
     psnr = peak_signal_noise_ratio(sr_image, hr_image)
     ssim = structural_similarity(sr_image,
                                  hr_image,
@@ -190,7 +191,7 @@ def main():
         print("Image {}/{}".format(index+1,len(filenames)))
 
         lr_filename = os.path.join(args.test_path_lr, filenames[index])
-        sr_filename = os.path.join("tests", args.name, filenames[index])
+        sr_filename = os.path.join("tests", args.name, 'full_image', filenames[index])
         hr_filename = os.path.join(args.test_path_hr, filenames[index])
 
         # Process low-resolution images into super-resolution images.
@@ -217,11 +218,11 @@ if __name__ == "__main__":
     create_folder("tests")
     create_folder(os.path.join("tests", args.name))
     create_folder(os.path.join("tests", args.name, "figs"))
+    create_folder(os.path.join("tests", args.name, "full_image"))
 
-    logger.info("Train Engine:")
-    logger.info("\tAPI version .......... 0.4.1")
-    logger.info("\tBuild ................ 2021.07.15")
-    logger.info("\tModified by Catalin Alexndru")
+    logger.info("TrainEngine:")
+    logger.info("\tAPI version .......... 0.4.0")
+    logger.info("\tBuild ................ 2021.07.09")
 
     main()
 
