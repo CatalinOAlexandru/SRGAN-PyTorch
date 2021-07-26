@@ -46,7 +46,7 @@ from skimage.metrics import peak_signal_noise_ratio
 from skimage.metrics import structural_similarity
 from torchvision.transforms import ToTensor
 from torchvision.utils import save_image
-print('Parameters...')
+
 # It is a convenient method for simple scripts to configure the log package at one time.
 logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
@@ -82,6 +82,17 @@ parserTrain.add_argument("--cuda", dest="cuda", action="store_true",
                     help="Enables cuda.")
 args = parserTrain.parse_args()
 
+logger.info(f"Parameters:")
+logger.info(f"--dataroot: {args.dataroot}")
+logger.info(f"--p-epochs: {args.p_epochs}")
+logger.info(f"--g-epochs: {args.g_epochs}")
+logger.info(f"--batch-size: {args.batch_size}")
+logger.info(f"--p-lr: {args.p_lr}")
+logger.info(f"--g-lr: {args.g_lr}")
+logger.info(f"--image-size: {args.image_size}")
+logger.info(f"--scale: {args.scale}")
+logger.info(f"--name: {args.name}")
+
 if ((args.image_size / args.scale)%1) != 0:
     sys.exit('The image size is not correctly divizible by the scale.')
 if ((args.image_size / 16)%1) != 0:
@@ -105,9 +116,9 @@ if torch.cuda.is_available() and not args.cuda:
                    "run with --cuda")
 
 device = torch.device("cuda:0" if args.cuda else "cpu")
-print('Using device:',device)
+logger.info(f"Using device: {device}")
 
-print('Loading Dataset...')
+logger.info(f"Loading Dataset...")
 # Load dataset.
 dataset = BaseDataset(dataroot=args.dataroot,
                       image_size=args.image_size,
@@ -117,7 +128,7 @@ dataloader = DataLoader(dataset=dataset,
                         shuffle=True,
                         pin_memory=True)
 
-print('Loading model...')
+logger.info(f"Loading model...")
 # Load model.
 netD = Discriminator(args.image_size).to(device)
 netG = Generator(args.scale).to(device)
@@ -150,7 +161,7 @@ g_optim = Adam(netG.parameters(), args.g_lr, (0.9, 0.999))
 d_scheduler = StepLR(d_optim, args.g_epochs // 2, 0.1)
 g_scheduler = StepLR(g_optim, args.g_epochs // 2, 0.1)
 
-print('Starting...')
+logger.info(f"Starting...")
 
 def main():
     # Use PSNR value as the image evaluation index in the process of training PSNR.
@@ -162,6 +173,8 @@ def main():
 
     bestPSNRepoch = 0
     bestGANepoch = 0
+
+    lastBest = 30
 
     # to save statistics
     # resultsP = {'p_loss': [], 'p_psnr': [], 'p_ssim': []}
@@ -195,9 +208,15 @@ def main():
         # highest, save another model ending with `best`.
         #torch.save(netG.state_dict(), join("weights",args.name, f"P_epoch{epoch}.pth"))
         if is_best:
+            lastBest = 30
             print('[ BEST ] PSNR at epoch {} with best PSNR {}'.format(str(epoch),best_psnr))
             bestPSNRepoch = int(epoch)
             torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
+        else:
+            lastBest -= 1
+
+        if lastBest == 0:
+            break
             
 
     # Save the model weights of the last iteration of the PSNR stage.
@@ -223,6 +242,7 @@ def main():
     # Train the generative model in the GAN stage and save the model weight after
     # reaching a certain index.
     saveEpochs = [10,25,40,50]
+    lastBest = 30
     for epoch in range(int(start_g_epoch), args.g_epochs):
         # Training.
         allLossD,allLossG = train_gan(epoch)
@@ -247,13 +267,19 @@ def main():
         # Save the model once after each epoch, if the current PSNR value is the
         # highest, save another model ending with `best`.
         #torch.save(netD.state_dict(), join("weights",args.name, f"D_epoch{epoch}.pth"))
-        if epoch in saveEpochs:
-            torch.save(netG.state_dict(), join("weights",args.name, f"G_epoch{epoch}.pth"))
+        # if epoch in saveEpochs:
+        #     torch.save(netG.state_dict(), join("weights",args.name, f"G_epoch{epoch}.pth"))
         if is_best:
+            lastBest = 30
             print('[ BEST ] GAN at epoch {} with SSIM {}'.format(str(epoch),best_ssim))
             bestGANepoch = int(epoch)
             torch.save(netD.state_dict(), join("weights",args.name, "D-best.pth"))
             torch.save(netG.state_dict(), join("weights",args.name, "G-best.pth"))
+        else:
+            lastBest -= 1
+
+        if lastBest == 0:
+            break
 
         # Call the scheduler function to adjust the learning rate of the
         # generator model and the discrimination model.
@@ -326,14 +352,9 @@ def train_gan(epoch):
         fake = netG(inputs)
         # print('target is:',target.shape)
         # print('fake is:',fake.shape)
-        # print('real_label is:',real_label)
-        # print('fake_label is:',fake_label)
         d_loss_real = adv_criterion(netD(target), real_label)
         d_loss_fake = adv_criterion(netD(fake.detach()), fake_label)
-        # d_loss = torch.tensor([0], dtype=torch.float)
         d_loss = d_loss_real + d_loss_fake
-        # print('d_loss_real is:',d_loss_real)
-        # print('d_loss_fake is:',d_loss_fake)
         # print('d_loss is:',d_loss)
         d_loss.backward()
         d_optim.step()

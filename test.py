@@ -36,6 +36,11 @@ from torchvision.utils import save_image
 from srgan_pytorch.model import Generator
 from srgan_pytorch.utils import create_folder
 
+import lpips
+
+import warnings
+warnings.simplefilter("ignore", UserWarning)
+
 # It is a convenient method for simple scripts to configure the log package at one time.
 logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
@@ -45,10 +50,7 @@ parserTest.add_argument("--pretrained", dest="pretrained", action="store_true", 
 parserTest.add_argument("--model-path", default="", type=str, help="Path to latest checkpoint for model.")
 parserTest.add_argument("--test-path-lr", default="data/Set14/LRbicx4", type=str, help="Path to test images")
 parserTest.add_argument("--test-path-hr", default="data/Set14/GTmod12", type=str, help="Path to test images")
-parserTest.add_argument("--p-epochs", default=512, type=int,help="Number of total p-oral epochs to run. (Default: 512)")
-parserTest.add_argument("--g-epochs", default=128, type=int,help="Number of total g-oral epochs to run. (Default: 128)")
 parserTest.add_argument("--scale-factor", default=4, type=int, help="Scale Factor for image")
-parserTest.add_argument("--batch-size", default=16, type=int,help="The batch size of the dataset. (Default: 16)")
 parserTest.add_argument("--name", default="DEF", type=str, help="Name for test folder")
 parserTest.add_argument("--cuda", dest="cuda", action="store_true", help="Enables cuda.")
 args = parserTest.parse_args()
@@ -71,6 +73,24 @@ def sr(model, lr_filename, sr_filename):
         lr_tensor = ToTensor()(lr).unsqueeze(0).to(device)
         sr_tensor = model(lr_tensor)
         save_image(sr_tensor.detach(), sr_filename, normalize=True)
+
+
+# normalize image between xmin and xmax
+def scale(X, x_min, x_max):
+    nom = (X-X.min(axis=0))*(x_max-x_min)
+    denom = X.max(axis=0) - X.min(axis=0)
+    denom[denom==0] = 1
+    return x_min + nom/denom
+
+
+def perpSim(sr_filename, hr_filename,loss_fn_alex):
+    # load image and normalize
+    sr_image = lpips.im2tensor(lpips.load_image(sr_filename)) # RGB image from [-1,1]
+    hr_image = lpips.im2tensor(lpips.load_image(hr_filename))
+
+    d1 = loss_fn_alex(sr_image, hr_image)
+
+    return d1.item()
 
 
 def iqa(sr_filename, hr_filename):
@@ -136,7 +156,7 @@ def iqa(sr_filename, hr_filename):
     return psnr, ssim
 
 
-def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim):
+def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim,d1):
     lr_image = imread(lr_filename)
     sr_image = imread(sr_filename)
     hr_image = imread(hr_filename)
@@ -145,7 +165,9 @@ def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim):
     sf = args.scale_factor # scale factor
 
     fig, axs = plt.subplots(2, 3)
-    name = 'PSNR: ' + str(round(psnr,2)) + " | SSIM: " + str(round(ssim,2))
+    name = 'PSNR: ' + str(round(psnr,2)) + \
+           ' | SSIM: ' + str(round(ssim,2)) + \
+           ' | PerceptSim: '+str(round(d1,2))
     fig.suptitle(name)
     lrsize = int(lr_image.shape[0]/2)
     srsize = int(sr_image.shape[0]/2)
@@ -159,6 +181,17 @@ def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim):
     axs[0,2].imshow(hr_image[srsize-(cropSize*sf):srsize+(cropSize*sf), srsize-(cropSize*sf):srsize+(cropSize*sf), :])
     axs[0,2].set_title('Ground Truth')
     axs[0,2].axis('off')
+
+    # axs[0,0].imshow(lr_image)
+    # axs[0,0].set_title('Low Res')
+    # axs[0,0].axis('off')
+    # axs[0,1].imshow(sr_image)
+    # axs[0,1].set_title('Super Res')
+    # axs[0,1].axis('off')
+    # axs[0,2].imshow(hr_image)
+    # axs[0,2].set_title('Ground Truth')
+    # axs[0,2].axis('off')
+
     axs[1,0].imshow(lr_image)
     axs[1,0].axis('off')
     axs[1,1].imshow(sr_image)
@@ -166,6 +199,7 @@ def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim):
     axs[1,2].imshow(hr_image)
     axs[1,2].axis('off')
     plt.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
 
     namePath = os.path.join("tests", args.name, 'figs',filename)
     fig.savefig(namePath,dpi=300)
@@ -177,6 +211,7 @@ def main():
     # Initialize the image quality evaluation index.
     avg_psnr = 0.0
     avg_ssim = 0.0
+    avg_percepSim = 0.0
 
     # Load model and weights.
     model = Generator(args.scale_factor).to(device).eval()
@@ -184,10 +219,16 @@ def main():
         logger.info(f"Loading weights from `{args.model_path}`.")
         model.load_state_dict(torch.load(args.model_path))
 
+    loss_fn_alex = lpips.LPIPS(net='alex') # best forward scores
+
     # Get test image file index.
     filenames = os.listdir(os.path.join(args.test_path_lr))
 
+    total = 0
     for index in range(len(filenames)):
+        if index == 11:
+            break
+
         print("Image {}/{}".format(index+1,len(filenames)))
 
         lr_filename = os.path.join(args.test_path_lr, filenames[index])
@@ -200,18 +241,25 @@ def main():
         # Test the image quality difference between the super-resolution image
         # and the original high-resolution image.
         psnr, ssim = iqa(sr_filename, hr_filename)
+        d1 = perpSim(sr_filename, hr_filename,loss_fn_alex)
+
         avg_psnr += psnr
         avg_ssim += ssim
+        avg_percepSim += d1
 
-        saveZoomImages(lr_filename,sr_filename,hr_filename,filenames[index],psnr,ssim)
+        saveZoomImages(lr_filename,sr_filename,hr_filename,filenames[index],psnr,ssim,d1)
+        total += 1
+        
 
 
     # Calculate the average index value of the image quality of the test dataset.
-    avg_psnr = avg_psnr / len(filenames)
-    avg_ssim = avg_ssim / len(filenames)
+    avg_psnr = avg_psnr / total
+    avg_ssim = avg_ssim / total
+    avg_percepSim = avg_percepSim / total
 
     logger.info(f"Avg PSNR: {avg_psnr:.2f}dB.")
     logger.info(f"Avg SSIM: {avg_ssim:.4f}.")
+    logger.info(f"Avg Perceptual Similarity: {avg_percepSim:.4f}.")
 
 
 if __name__ == "__main__":

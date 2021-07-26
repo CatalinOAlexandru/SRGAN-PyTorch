@@ -40,10 +40,10 @@ class ResidualBlock(nn.Module):
     def __init__(self, channels: int):
         super(ResidualBlock, self).__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, 1, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
+        self.bn1 = nn.BatchNorm2d(channels, track_running_stats=False)
         self.prelu = nn.PReLU()
         self.conv2 = nn.Conv2d(channels, channels, 3, 1, 1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)
+        self.bn2 = nn.BatchNorm2d(channels, track_running_stats=False)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -84,7 +84,7 @@ class Discriminator(nn.Module):
         # as from the original implementation it fixes some differences in sizes
         # which were initially hard coded for 96x96 image size. classfieierAdaption
         # will allow for all kind of image sizes without affecting the training.
-        classifierAdaption = int((imgSize/16)**2)
+        classifierAdaption = int((imgSize/16)**2) # ** 2 is to not do 6x6 later for each nxmxd
 
         super(Discriminator, self).__init__()
 
@@ -94,28 +94,28 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, True),
             # state size. (64) x 48 x 48
             nn.Conv2d(64, 64, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(64),
+            nn.BatchNorm2d(64, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             nn.Conv2d(64, 128, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(128, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             # state size. (128) x 24 x 24
             nn.Conv2d(128, 128, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(128, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             nn.Conv2d(128, 256, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.BatchNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             # state size. (256) x 12 x 12
             nn.Conv2d(256, 256, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.BatchNorm2d(256, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             # state size. (512) x 6 x 6
             nn.Conv2d(256, 512, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(512),
+            nn.BatchNorm2d(512, track_running_stats=False),
             nn.LeakyReLU(0.2, True),
             nn.Conv2d(512, 512, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(512),
+            nn.BatchNorm2d(512, track_running_stats=False),
             nn.LeakyReLU(0.2, True)
         )
 
@@ -173,7 +173,7 @@ class Generator(nn.Module):
         # Second conv layer post residual blocks.
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 64, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(64)
+            nn.BatchNorm2d(64, track_running_stats=False)
         )
 
         # 2 Sub-pixel convolution layers.
