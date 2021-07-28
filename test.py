@@ -23,6 +23,7 @@ import logging
 import os
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt 
+import pandas as pd
 
 import torch
 from PIL import Image
@@ -51,6 +52,7 @@ parserTest.add_argument("--model-path", default="", type=str, help="Path to late
 parserTest.add_argument("--test-path-lr", default="data/Set14/LRbicx4", type=str, help="Path to test images")
 parserTest.add_argument("--test-path-hr", default="data/Set14/GTmod12", type=str, help="Path to test images")
 parserTest.add_argument("--scale-factor", default=4, type=int, help="Scale Factor for image")
+parserTest.add_argument("--max-images", default=None, type=int, help="Only run testing on N amount of images instead of the entire test folder.")
 parserTest.add_argument("--name", default="DEF", type=str, help="Name for test folder")
 parserTest.add_argument("--cuda", dest="cuda", action="store_true", help="Enables cuda.")
 args = parserTest.parse_args()
@@ -182,16 +184,6 @@ def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim,d1):
     axs[0,2].set_title('Ground Truth')
     axs[0,2].axis('off')
 
-    # axs[0,0].imshow(lr_image)
-    # axs[0,0].set_title('Low Res')
-    # axs[0,0].axis('off')
-    # axs[0,1].imshow(sr_image)
-    # axs[0,1].set_title('Super Res')
-    # axs[0,1].axis('off')
-    # axs[0,2].imshow(hr_image)
-    # axs[0,2].set_title('Ground Truth')
-    # axs[0,2].axis('off')
-
     axs[1,0].imshow(lr_image)
     axs[1,0].axis('off')
     axs[1,1].imshow(sr_image)
@@ -208,11 +200,6 @@ def saveZoomImages(lr_filename,sr_filename,hr_filename,filename,psnr,ssim,d1):
 
 
 def main():
-    # Initialize the image quality evaluation index.
-    avg_psnr = 0.0
-    avg_ssim = 0.0
-    avg_percepSim = 0.0
-
     # Load model and weights.
     model = Generator(args.scale_factor).to(device).eval()
     if args.model_path != "":
@@ -224,9 +211,11 @@ def main():
     # Get test image file index.
     filenames = os.listdir(os.path.join(args.test_path_lr))
 
-    total = 0
+    # for statistics
+    resultScores = {'psnr': [], 'ssim': [], 'perpSimi': []}
+
     for index in range(len(filenames)):
-        if index == 11:
+        if (args.max_images != None) and args.max_images == index:
             break
 
         print("Image {}/{}".format(index+1,len(filenames)))
@@ -241,39 +230,44 @@ def main():
         # Test the image quality difference between the super-resolution image
         # and the original high-resolution image.
         psnr, ssim = iqa(sr_filename, hr_filename)
-        d1 = perpSim(sr_filename, hr_filename,loss_fn_alex)
+        perpSimi = perpSim(sr_filename, hr_filename,loss_fn_alex)
 
-        avg_psnr += psnr
-        avg_ssim += ssim
-        avg_percepSim += d1
+        resultScores['psnr'].append(psnr)
+        resultScores['ssim'].append(ssim)
+        resultScores['perpSimi'].append(perpSimi)
 
-        saveZoomImages(lr_filename,sr_filename,hr_filename,filenames[index],psnr,ssim,d1)
-        total += 1
-        
+        saveZoomImages(lr_filename,sr_filename,hr_filename,filenames[index],psnr,ssim,perpSimi)
 
 
     # Calculate the average index value of the image quality of the test dataset.
-    avg_psnr = avg_psnr / total
-    avg_ssim = avg_ssim / total
-    avg_percepSim = avg_percepSim / total
+    avg_psnr = sum(resultScores['psnr']) / len(resultScores['psnr'])
+    avg_ssim = sum(resultScores['ssim']) / len(resultScores['ssim'])
+    avg_percepSim = sum(resultScores['perpSimi']) / len(resultScores['perpSimi'])
 
-    logger.info(f"Avg PSNR: {avg_psnr:.2f}dB.")
-    logger.info(f"Avg SSIM: {avg_ssim:.4f}.")
-    logger.info(f"Avg Perceptual Similarity: {avg_percepSim:.4f}.")
+    logger.info(f"Mean Average PSNR: {avg_psnr:.2f}dB.")
+    logger.info(f"Mean Average SSIM: {avg_ssim:.4f}.")
+    logger.info(f"Mean Average Perceptual Similarity: {avg_percepSim:.4f}.")
+
+    out_path = 'stats/'
+    data_frame_score = pd.DataFrame(
+        data={'PSNR Score': resultScores['psnr'], 'SSIM Score': resultScores['ssim'], 'Perceptual Similarity Score': resultScores['perpSimi']},
+        index=filenames[:len(resultScores['psnr'])])
+    data_frame_score.to_csv(out_path + str(args.name) + '_Testing_Scores.csv', index_label='File Name')
 
 
 if __name__ == "__main__":
-    create_folder("tests")
+    # create_folder("tests")
     create_folder(os.path.join("tests", args.name))
     create_folder(os.path.join("tests", args.name, "figs"))
     create_folder(os.path.join("tests", args.name, "full_image"))
+    # create_folder("stats")
 
     logger.info("TrainEngine:")
-    logger.info("\tAPI version .......... 0.4.0")
+    logger.info("\tAPI version .......... 0.4.1")
     logger.info("\tBuild ................ 2021.07.09")
     logger.info("\tModified by ... Catalin Alexandru")
-    logger.info("\tOn ................... 2021.07.21")
+    logger.info("\tOn ................... 2021.07.28")
 
     main()
 
-    logger.info("All training has been completed successfully.\n")
+    logger.info("All testing has been completed successfully.\n")

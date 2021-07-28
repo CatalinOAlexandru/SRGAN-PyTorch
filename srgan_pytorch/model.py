@@ -155,7 +155,7 @@ class Discriminator(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self,scale_factor,num_resBlocks):
+    def __init__(self,scale_factor,num_resBlocks = 16):
         upsample_block_num = int(math.log(scale_factor, 2))
 
         super(Generator, self).__init__()
