@@ -13,7 +13,7 @@
 # ==============================================================================
 
 # Modified by ... Catalin Alexandru
-# On ................... 2021.07.21
+# On ................... 2021.07.28
 
 # ==============================================================================
 
@@ -84,6 +84,7 @@ class Discriminator(nn.Module):
         # as from the original implementation it fixes some differences in sizes
         # which were initially hard coded for 96x96 image size. classfieierAdaption
         # will allow for all kind of image sizes without affecting the training.
+        # we divide by 16 based on the architecture numbers and what output is always expected.
         classifierAdaption = int((imgSize/16)**2) # ** 2 is to not do 6x6 later for each nxmxd
 
         super(Discriminator, self).__init__()
@@ -154,7 +155,7 @@ class Discriminator(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self,scale_factor):
+    def __init__(self,scale_factor,num_resBlocks):
         upsample_block_num = int(math.log(scale_factor, 2))
 
         super(Generator, self).__init__()
@@ -166,7 +167,9 @@ class Generator(nn.Module):
 
         # 16 Residual blocks.
         trunk = []
-        for _ in range(16):
+        # used to be in range 16 as in the paper.
+        # however, I am attempting to make the model deeper for testing.
+        for _ in range(num_resBlocks):
             trunk += [ResidualBlock(64)]
         self.trunk = nn.Sequential(*trunk)
 
