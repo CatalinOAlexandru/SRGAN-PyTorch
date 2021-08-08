@@ -31,7 +31,7 @@ def create_folder(dir_name):
         os.makedirs(dir_name)
         logger.info(f"Create `{dir_path}` directory successful.")
     except OSError:
-        logger.warning(f"Directory `{dir_path}` already exists!")
+        # logger.warning(f"Directory `{dir_path}` already exists!")
         pass
 
 
