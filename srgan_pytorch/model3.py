@@ -15,6 +15,9 @@
 # Modified by ... Catalin Alexandru
 # On ................... 2021.07.28
 
+# This file is used ONLY for testing some pre trained models.
+# For training im using model3 or latest model which has more changes.
+
 # ==============================================================================
 
 import torch
@@ -40,10 +43,10 @@ class ResidualBlock(nn.Module):
     def __init__(self, channels: int):
         super(ResidualBlock, self).__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, 1, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels, track_running_stats=False)
+        self.bn1 = nn.BatchNorm2d(channels)
         self.prelu = nn.PReLU()
         self.conv2 = nn.Conv2d(channels, channels, 3, 1, 1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels, track_running_stats=False)
+        self.bn2 = nn.BatchNorm2d(channels)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -85,43 +88,79 @@ class Discriminator(nn.Module):
         # which were initially hard coded for 96x96 image size. classfieierAdaption
         # will allow for all kind of image sizes without affecting the training.
         # we divide by 16 based on the architecture numbers and what output is always expected.
-        classifierAdaption = int((imgSize/16)**2) # ** 2 is to not do 6x6 later for each nxmxd
+        classifierAdaption = int((imgSize/(16*2))**2) # ** 2 is to not do 6x6 later for each nxmxd
 
         super(Discriminator, self).__init__()
 
-        self.features = nn.Sequential(
-            # input size. (3) x 96 x 96
-            nn.Conv2d(3, 64, 3, 1, 1),
-            nn.LeakyReLU(0.2, True),
-            # state size. (64) x 48 x 48
+        # Layer 1 input: torch.Size([32, 3, 96, 96])
+        # Layer 1 output: torch.Size([32, 64, 96, 96]
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 2 output: torch.Size([32, 64, 48, 48])
+        self.layer2 = nn.Sequential(
             nn.Conv2d(64, 64, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(64, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2, True))
+
+        # EXTRA Layer 2 output: 
+        self.layer2_extra = nn.Sequential(
+            nn.Conv2d(64, 64, 3, 1, 1, bias=False, padding_mode='reflect'),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 3 output: torch.Size([32, 128, 48, 48])
+        self.layer3 = nn.Sequential(
             nn.Conv2d(64, 128, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(128, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
-            # state size. (128) x 24 x 24
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 4 output: torch.Size([32, 128, 24, 24])
+        self.layer4 = nn.Sequential(
             nn.Conv2d(128, 128, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(128, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 5 output: torch.Size([32, 256, 24, 24])
+        self.layer5 = nn.Sequential(
             nn.Conv2d(128, 256, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(256, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
-            # state size. (256) x 12 x 12
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 6 output: torch.Size([32, 256, 12, 12])
+        self.layer6 = nn.Sequential(
             nn.Conv2d(256, 256, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(256, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
-            # state size. (512) x 6 x 6
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 7 output: torch.Size([32, 512, 12, 12])
+        self.layer7 = nn.Sequential(
             nn.Conv2d(256, 512, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(512, track_running_stats=False),
-            nn.LeakyReLU(0.2, True),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, True))
+
+        # Layer 8 output: torch.Size([32, 512, 6, 6])
+        self.layer8 = nn.Sequential(
             nn.Conv2d(512, 512, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(512, track_running_stats=False),
-            nn.LeakyReLU(0.2, True)
-        )
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, True))
+
+        # # Layer 9 output: 
+        # self.layer9 = nn.Sequential(
+        #     nn.Conv2d(512, 1024, 3, 1, 1, bias=False),
+        #     nn.BatchNorm2d(1024),
+        #     nn.LeakyReLU(0.2, True))
+
+        # # Layer 10 output: 
+        # self.layer10 = nn.Sequential(
+        #     nn.Conv2d(1024, 1024, 3, 2, 1, bias=False),
+        #     nn.BatchNorm2d(1024),
+        #     nn.LeakyReLU(0.2, True))
+
 
         self.classifier = nn.Sequential(
-            nn.Linear(512 * classifierAdaption, 1024),
+            nn.Linear(1024 * classifierAdaption, 1024),
             nn.LeakyReLU(0.2, True),
             nn.Linear(1024, 1),
             nn.Sigmoid()
@@ -130,15 +169,48 @@ class Discriminator(nn.Module):
         # Init all model weights.
         self._initialize_weights()
 
+    def printGrad(grad):
+        print(grad)
 
     def forward(self, x):
-        # print('Discriminator input',x.shape)
-        out = self.features(x)
+        print('Discriminator input',x.shape)
+
+        # out = self.features(x)
         # print('Discriminator after features',out.shape)
+
+        out = self.layer1(x)
+        print('Layer 1 output:',out.shape)
+
+        out = self.layer2(out) # can loop
+        print('Layer 2 output:',out.shape)
+
+        out = self.layer2_extra(out) # can loop
+        print('Layer 2 EXTRA output:',out.shape)
+
+        # out.register_hook(printGrad)
+
+        out = self.layer3(out)
+        print('Layer 3 output:',out.shape)
+
+        out = self.layer4(out) # can loop
+        print('Layer 4 output:',out.shape)
+
+        out = self.layer5(out)
+        print('Layer 5 output:',out.shape)
+
+        out = self.layer6(out) # can loop
+        print('Layer 6 output:',out.shape)
+
+        out = self.layer7(out)
+        print('Layer 7 output:',out.shape)
+
+        out = self.layer8(out) # can loop
+        print('Layer 8 output:',out.shape)
+
         out = torch.flatten(out, 1)
-        # print('Discriminator after flatten',out.shape)
+        print('Discriminator after flatten',out.shape)
         out = self.classifier(out)
-        # print('Discriminator after classifier',out.shape)
+        print('Discriminator after classifier',out.shape)
 
         return out
 
@@ -176,7 +248,7 @@ class Generator(nn.Module):
         # Second conv layer post residual blocks.
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 64, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(64, track_running_stats=False)
+            nn.BatchNorm2d(64)
         )
 
         # 2 Sub-pixel convolution layers.
