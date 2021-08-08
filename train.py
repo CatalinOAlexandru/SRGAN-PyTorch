@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-print('Importing...')
+
 import logging
 import random
 import os
@@ -34,8 +34,8 @@ from torch.utils.data import DataLoader
 
 from srgan_pytorch.dataset import BaseDataset
 from srgan_pytorch.loss import ContentLoss
-from srgan_pytorch.model import Discriminator
-from srgan_pytorch.model import Generator
+# from srgan_pytorch.model3 import Discriminator
+# from srgan_pytorch.model3 import Generator
 from srgan_pytorch.utils import create_folder
 
 from PIL import Image
@@ -51,11 +51,11 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
 parserTrain = ArgumentParser()
-parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/histo_split_4/train",
+parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/Histology/train",
                     help="Path to dataset.")
-parserTrain.add_argument("--p-epochs", default=512, type=int,
+parserTrain.add_argument("--p-epochs", default=1000, type=int,
                     help="Number of total p-oral epochs to run. (Default: 512)")
-parserTrain.add_argument("--g-epochs", default=128, type=int,
+parserTrain.add_argument("--g-epochs", default=1000, type=int,
                     help="Number of total g-oral epochs to run. (Default: 128)")
 parserTrain.add_argument("--batch-size", default=16, type=int,
                     help="The batch size of the dataset. (Default: 16)")
@@ -69,6 +69,8 @@ parserTrain.add_argument("--num-resBlocks", default=16, type=int,
                     help="Number of Residual Blocks blocks used in the model. Default: 16 as in the paper.")
 parserTrain.add_argument("--scale", default=4, type=int,
                     help="Low to high resolution scaling factor.")
+parserTrain.add_argument("--model-type", default="model2", type=str,
+                    help="Which model.py file to use.")
 parserTrain.add_argument("--netD", default="", type=str,
                     help="Path to Discriminator checkpoint.")
 parserTrain.add_argument("--netG", default="", type=str,
@@ -97,6 +99,14 @@ logger.info(f"--num-resBlocks: {args.num_resBlocks}")
 logger.info(f"--scale: {args.scale}")
 logger.info(f"--max-no-improve: {args.max_no_improve}")
 logger.info(f"--name: {args.name}")
+logger.info(f"--model-type: {args.model_type}")
+
+if args.model_type == 'model3':
+    from srgan_pytorch.model3 import Discriminator
+    from srgan_pytorch.model3 import Generator
+else:
+    from srgan_pytorch.model2 import Discriminator
+    from srgan_pytorch.model2 import Generator
 
 if ((args.image_size / args.scale)%1) != 0:
     sys.exit('The image size is not correctly divizible by the scale.')
@@ -184,9 +194,14 @@ def main():
     # to save statistics
     resultsP = {'p_loss': [], 'p_psnr': [], 'p_ssim': []}
 
+    # as we can end the training sooner if there is no imrovements, I need a counter for statistics
+    epochCounter = 0
+
     # Train the PSNR stage of the generative model, and save the model weight
     # after reaching a certain index.
     for epoch in range(int(start_p_epoch), args.p_epochs):
+        epochCounter += 1
+
         # Training.
         psnrLoss = train_psnr(epoch)
         # Test.
@@ -223,11 +238,11 @@ def main():
     # Save the model weights of the last iteration of the PSNR stage.
     torch.save(netG.state_dict(), join("weights",args.name, "P-last.pth"))
 
-    out_path = 'stats/'
+    out_path = 'stats/training'
     data_frame_p = pd.DataFrame(
         data={'Loss PSNR Training': resultsP['p_loss'], 'PSNR Score': resultsP['p_psnr'], 'SSIM Score': resultsP['p_ssim']},
-        index=range(1, args.p_epochs + 1))
-    data_frame_p.to_csv(out_path + str(args.name)+'_' + str(args.scale) + '_P_results.csv', index_label='Epoch')
+        index=range(1, epochCounter+1))
+    data_frame_p.to_csv(out_path + str(args.name)+'_' + str(args.scale) + '_P_train.csv', index_label='Epoch')
 
 
 
@@ -237,7 +252,12 @@ def main():
     # Train the generative model in the GAN stage and save the model weight after
     # reaching a certain index.
     lastBest = args.max_no_improve
+
+    # as above, counter to be used in statistics
+    epochCounter = 0
+
     for epoch in range(int(start_g_epoch), args.g_epochs):
+        epochCounter += 1
         # Training.
         allLossD,allLossG = train_gan(epoch)
         # Test.
@@ -285,7 +305,7 @@ def main():
 
     data_frame_g = pd.DataFrame(
         data={'Loss Discriminator': resultsG['d_loss'], 'Loss Generator': resultsG['g_loss'], 'PSNR Score': resultsG['g_psnr'], 'SSIM Score': resultsG['g_ssim']},
-        index=range(1, args.g_epochs + 1))
+        index=range(1, epochCounter+1))
     data_frame_g.to_csv(out_path + str(args.name)+'_' + str(args.scale) + '_G_train.csv', index_label='Epoch')
 
 
@@ -325,10 +345,8 @@ def train_gan(epoch):
         batch_size = inputs.size(0)
 
         # Set the real sample label to 1, and the false sample label to 0.
-        real_label = torch.full((batch_size, 1), 1, dtype=inputs.dtype).to(
-            device)
-        fake_label = torch.full((batch_size, 1), 0, dtype=inputs.dtype).to(
-            device)
+        real_label = torch.full((batch_size, 1), 1, dtype=inputs.dtype).to(device)
+        fake_label = torch.full((batch_size, 1), 0, dtype=inputs.dtype).to(device)
 
         ##############################################
         # (1) Update D network: E(real)[log(D(real))] + E(fake)[log(1 - D(G(fake))]
@@ -340,8 +358,14 @@ def train_gan(epoch):
         d_loss_real = adv_criterion(netD(target), real_label)
         d_loss_fake = adv_criterion(netD(fake.detach()), fake_label)
         d_loss = d_loss_real + d_loss_fake
-        # print('d_loss is:',d_loss)
-        d_loss.backward()
+        # print('dlossreal:',d_loss_real)
+        # print('dlossfake:',d_loss_fake)
+        # print('dloss:',d_loss)
+
+        # Can remove for different tests
+        with torch.autograd.set_detect_anomaly(True):
+            d_loss.backward()
+
         d_optim.step()
 
         ##############################################
@@ -434,16 +458,17 @@ def iqa(sr_filename, hr_filename):
 
 
 if __name__ == "__main__":
-    # create_folder("weights")
+    create_folder("weights")
     create_folder(os.path.join("weights", args.name))
     create_folder(os.path.join("assets", args.name))
-    # create_folder("stats")
+    create_folder("stats")
+    create_folder("stats/training")
 
     logger.info("TrainEngine:")
     logger.info("\tAPI version .......... 0.4.1")
     logger.info("\tBuild ................ 2021.07.09")
     logger.info("\tModified by ... Catalin Alexandru")
-    logger.info("\tOn ................... 2021.07.28")
+    logger.info("\tOn ................... 2021.08.08")
 
     main()
 
