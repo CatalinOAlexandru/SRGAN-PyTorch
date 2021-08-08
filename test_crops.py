@@ -319,7 +319,7 @@ if __name__ == "__main__":
     logger.info("\tAPI version .......... 0.4.1")
     logger.info("\tBuild ................ 2021.07.09")
     logger.info("\tModified by ... Catalin Alexandru")
-    logger.info("\tOn ................... 2021.07.28")
+    logger.info("\tOn ................... 2021.08.08")
 
     main()
 
