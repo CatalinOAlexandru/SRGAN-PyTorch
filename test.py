@@ -51,10 +51,10 @@ logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 
 parserTest = ArgumentParser()
 parserTest.add_argument("--pretrained", dest="pretrained", action="store_true", help="Use pre-trained model.")
-parserTest.add_argument("--model-path", default="", type=str, help="Path to latest checkpoint for model.")
-parserTest.add_argument("--model-type", default="model2", type=str, help="Which model file to use. Default: model3")
+parserTest.add_argument("--model-path", default=None, type=str, help="Path to latest checkpoint for model.")
+parserTest.add_argument("--model-type", default="model2", type=str, help="Which model file to use. Default: model2")
 # parserTest.add_argument("--test-path-lr", default="data/Set14/LRbicx4", type=str, help="Path to test images")
-parserTest.add_argument("--test-path-hr", default="data/Set14/GTmod12", type=str, help="Path to test images")
+parserTest.add_argument("--test-path-hr", default="/home/calexand/datasets/histo_split_4/cropTarget", type=str, help="Path to test images")
 parserTest.add_argument("--scale-factor", default=4, type=int, help="Scale Factor for image")
 parserTest.add_argument("--max-images", default=None, type=int, help="Only run testing on N amount of images instead of the entire test folder.")
 parserTest.add_argument("--num-resBlocks", default=16, type=int, help="Number of Residual Blocks blocks used in the model. Default: 16 as in the paper.")
@@ -62,12 +62,12 @@ parserTest.add_argument("--name", default="DEF", type=str, help="Name for test f
 parserTest.add_argument("--cuda", dest="cuda", action="store_true", help="Enables cuda.")
 args = parserTest.parse_args()
 
-if args.model_type == 'model2' or args.model_type == 'model3':
+if args.model_type == 'model2' or args.model_type == 'model3' or args.model_type == 'model32':
     from srgan_pytorch.model2 import Generator
 elif args.model_type == 'model1':
     from srgan_pytorch.model1 import Generator
 else:
-    print('Model selected is not available. Use "model1", "model2" or "model3".')
+    print('Model selected is not available. Use "model1", "model2", "model3" or "model32".')
     sys.exit()
 
 # Set whether to use CUDA.
@@ -115,9 +115,23 @@ def scale(X, x_min, x_max):
 
 
 def perpSim(sr_filename, hr_filename,loss_fn_alex):
-    # load image and normalize
-    sr_image = lpips.im2tensor(lpips.load_image(sr_filename)) # RGB image from [-1,1]
-    hr_image = lpips.im2tensor(lpips.load_image(hr_filename))
+
+    sr_image = lpips.load_image(sr_filename) # RGB image from [-1,1]
+    hr_image = lpips.load_image(hr_filename)
+
+    srSize = sr_image.shape[0]
+    hrSize = hr_image.shape[0]
+    if(srSize > hrSize):
+        diff = int((srSize - hrSize)/2)
+        sr_image = sr_image[diff:-diff, diff:-diff, ...]
+    elif(hrSize > srSize):
+        diff = int((hrSize - srSize)/2)
+        hr_image = hr_image[diff:-diff, diff:-diff, ...]
+    else:
+    pass
+
+    sr_image = lpips.im2tensor(sr_image) 
+    hr_image = lpips.im2tensor(hr_image)
 
     d1 = loss_fn_alex(sr_image, hr_image)
 
@@ -144,25 +158,18 @@ def iqa(sr_filename, hr_filename):
     if(srSize == hrSize):
         sr_image = sr_image[4:-4, 4:-4, ...]
         hr_image = hr_image[4:-4, 4:-4, ...]
+    elif(srSize > hrSize):
+        diff = int((srSize - hrSize)/2)
+        sr_image = sr_image[diff:-diff, diff:-diff, ...]
+
+        sr_image = sr_image[4:-4, 4:-4, ...]
+        hr_image = hr_image[4:-4, 4:-4, ...]
     else:
-        print('sr',srSize)
-        print('hr',hrSize)
-        raise Exception("Difference between SR and HR sizes. Should be equal.")
-    # elif(srSize > hrSize):
-    #     diff = srSize - hrSize
-    #     if diff == 8:
-    #         # images wont be pixel perfect as they are no longer symetric however
-    #         # PSNR should do fine to see similarities
-    #         sr_image = sr_image[4:-4, 4:-4, ...]
-    #     else:
-    #         raise Exception("Difference between SR and HR is not 8. Fix the math.")
-    # else:
-    #     diff = hrSize - srSize # swapped these 2
-    #     if diff == 8:
-    #         # same as above
-    #         hr_image = hr_image[4:-4, 4:-4, ...]
-    #     else:
-    #         raise Exception("Difference between SR and HR is not 8. Fix the math.")
+        diff = int((hrSize - srSize)/2) 
+        hr_image = hr_image[diff:-diff, diff:-diff, ...]
+
+        sr_image = sr_image[4:-4, 4:-4, ...]
+        hr_image = hr_image[4:-4, 4:-4, ...]
 
     # Calculate the Y channel of the image. Use the Y channel to calculate PSNR
     # and SSIM instead of using RGB three channels.
@@ -242,9 +249,13 @@ def main():
     else:
         model = Generator(args.scale_factor, args.num_resBlocks).to(device).eval()
 
-    if args.model_path != "":
+    if args.model_path != None:
         logger.info(f"Loading weights from `{args.model_path}`.")
         model.load_state_dict(torch.load(args.model_path))
+    else:
+        crateModelPath = os.path.join("weights", args.name, 'G-last.pth')
+        logger.info(f"Loading weights from `{crateModelPath}`.")
+        model.load_state_dict(torch.load(crateModelPath))
 
     loss_fn_alex = lpips.LPIPS(net='alex') # best forward scores
 
@@ -287,14 +298,14 @@ def main():
     avg_ssim = sum(resultScores['ssim']) / len(resultScores['ssim'])
     avg_percepSim = sum(resultScores['perpSimi']) / len(resultScores['perpSimi'])
 
-    logger.info(f"Mean Average PSNR: {avg_psnr:.2f}dB.")
-    logger.info(f"Mean Average SSIM: {avg_ssim:.4f}.")
-    logger.info(f"Mean Average Perceptual Similarity: {avg_percepSim:.4f}.")
-    logger.info(f"PSNR Best / Worst: {np.max(resultScores['psnr']):.2f} / {np.min(resultScores['psnr']):.2f}")
-    logger.info(f"SSIM Best / Worst: {np.max(resultScores['ssim']):.2f} / {np.min(resultScores['ssim']):.2f}")
-    logger.info(f"PercepSim Best/Worst: {np.min(resultScores['perpSimi']):.3f} / {np.max(resultScores['perpSimi']):.3f}")
+    logger.info(f"Mean Average PSNR: {str(round(avg_psnr,2))}")
+    logger.info(f"Mean Average SSIM: {str(round(avg_ssim,4))}")
+    logger.info(f"Mean Average Perceptual Similarity: {str(round(avg_percepSim,4))}")
+    logger.info(f"PSNR Best / Worst: {str(round(np.max(resultScores['psnr']),2))} / {str(round(np.min(resultScores['psnr']),2))}")
+    logger.info(f"SSIM Best / Worst: {str(round(np.max(resultScores['ssim']),2))} / {str(round(np.min(resultScores['ssim']),2))}")
+    logger.info(f"PercepSim Best/Worst: {str(round(np.min(resultScores['perpSimi']),3))} / {str(round(np.max(resultScores['perpSimi']),3))}")
 
-    out_path = 'stats/testing'
+    out_path = 'stats/testing/'
     data_frame_score = pd.DataFrame(
         data={'PSNR Score': resultScores['psnr'], 'SSIM Score': resultScores['ssim'], 'Perceptual Similarity Score': resultScores['perpSimi']},
         index=filenames[:len(resultScores['psnr'])])
