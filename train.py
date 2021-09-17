@@ -53,11 +53,13 @@ logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 parserTrain = ArgumentParser()
 parserTrain.add_argument("--dataroot", default="/home/calexand/datasets/Histology/train",
                     help="Path to dataset.")
-parserTrain.add_argument("--p-epochs", default=1000, type=int,
+parserTrain.add_argument("--assetsroot", default="assets",
+                    help="Path to assets folder.")
+parserTrain.add_argument("--p-epochs", default=25, type=int,
                     help="Number of total p-oral epochs to run. (Default: 512)")
-parserTrain.add_argument("--g-epochs", default=1000, type=int,
+parserTrain.add_argument("--g-epochs", default=25, type=int,
                     help="Number of total g-oral epochs to run. (Default: 128)")
-parserTrain.add_argument("--batch-size", default=16, type=int,
+parserTrain.add_argument("--batch-size", default=8, type=int,
                     help="The batch size of the dataset. (Default: 16)")
 parserTrain.add_argument("--p-lr", default=0.0001, type=float,
                     help="Learning rate for psnr-oral. (Default: 0.0001)")
@@ -65,6 +67,8 @@ parserTrain.add_argument("--g-lr", default=0.0001, type=float,
                     help="Learning rate for gan-oral. (Default: 0.0001)")
 parserTrain.add_argument("--image-size", default=96, type=int,
                     help="Image size of high resolution image. (Default: 96)")
+parserTrain.add_argument("--downsample-from", default=0, type=int,
+                    help="Allow for a wider field of view of the crop which will be downsampled to image size (Default: 0 [off])")
 parserTrain.add_argument("--num-resBlocks", default=16, type=int,
                     help="Number of Residual Blocks blocks used in the model. Default: 16 as in the paper.")
 parserTrain.add_argument("--scale", default=4, type=int,
@@ -79,7 +83,7 @@ parserTrain.add_argument("--name", default="DEF", type=str,
                     help="Name for some folders")
 parserTrain.add_argument("--seed", default=None, type=int,
                     help="Seed for initializing training.")
-parserTrain.add_argument("--max-no-improve", default=25, type=int,
+parserTrain.add_argument("--max-no-improve", default=100, type=int,
                     help="Like a TF callback of patience, this selects how many epochs the model will keep training without improving. (Default: 25)")
 parserTrain.add_argument("--pretrained", dest="pretrained", action="store_true",
                     help="Use pre-trained model.")
@@ -95,6 +99,9 @@ logger.info(f"--batch-size: {args.batch_size}")
 logger.info(f"--p-lr: {args.p_lr}")
 logger.info(f"--g-lr: {args.g_lr}")
 logger.info(f"--image-size: {args.image_size}")
+if args.downsample_from == -1:
+    args.downsample_from = args.image_size * 2
+logger.info(f"--downsample-from: {args.downsample_from}")
 logger.info(f"--num-resBlocks: {args.num_resBlocks}")
 logger.info(f"--scale: {args.scale}")
 logger.info(f"--max-no-improve: {args.max_no_improve}")
@@ -104,6 +111,15 @@ logger.info(f"--model-type: {args.model_type}")
 if args.model_type == 'model3':
     from srgan_pytorch.model3 import Discriminator
     from srgan_pytorch.model3 import Generator
+elif args.model_type == 'model32':
+    from srgan_pytorch.model32 import Discriminator
+    from srgan_pytorch.model32 import Generator
+elif args.model_type == 'model33':
+    from srgan_pytorch.model33 import Discriminator
+    from srgan_pytorch.model33 import Generator
+elif args.model_type == 'model36':
+    from srgan_pytorch.model36 import Discriminator
+    from srgan_pytorch.model36 import Generator
 else:
     from srgan_pytorch.model2 import Discriminator
     from srgan_pytorch.model2 import Generator
@@ -115,15 +131,18 @@ if ((args.image_size / 16)%1) != 0:
 
 # Random seed can ensure that the results of each training are inconsistent.
 if args.seed is None:
-    args.seed = random.randint(1, 10000)
-logger.info(f"Random Seed: {args.seed}")
+    # args.seed = random.randint(1, 10000)
+    args.seed = 111
+
+logger.info(f"Seed: {args.seed}")
 random.seed(args.seed)
 torch.manual_seed(args.seed)
+np.random.seed(args.seed)
 
 # Because the resolution of each input image is fixed, setting it to `True`
 # will make CUDNN automatically find the optimal convolution method.
 # If the input image resolution is not fixed, it needs to be set to `False`.
-cudnn.benchmark = True
+# cudnn.benchmark = True
 
 # Set whether to use CUDA.
 if torch.cuda.is_available() and not args.cuda:
@@ -131,13 +150,22 @@ if torch.cuda.is_available() and not args.cuda:
                    "run with --cuda")
 
 device = torch.device("cuda:0" if args.cuda else "cpu")
+
+if device == 'cuda:0':
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)  
+    torch.backends.cudnn.deterministic = True   
+    torch.backends.cudnn.benchmark = True
+ 
+
 logger.info(f"Using device: {device}")
 
 logger.info(f"Loading Dataset...")
 # Load dataset.
 dataset = BaseDataset(dataroot=args.dataroot,
                       image_size=args.image_size,
-                      scale=args.scale)
+                      scale=args.scale,
+                      downFrom = args.downsample_from)
 dataloader = DataLoader(dataset=dataset,
                         batch_size=args.batch_size,
                         shuffle=True,
@@ -206,11 +234,11 @@ def main():
         psnrLoss = train_psnr(epoch)
         # Test.
         lrImg = 'lr_' + str(args.scale) + '.jpg'
-        sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
+        sr(netG, join(args.assetsroot, lrImg), join(args.assetsroot,args.name, "sr.jpg"))
         if args.scale > 15:
-            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr_extra.jpg"))
+            psnr, ssim = iqa(join(args.assetsroot,args.name, "sr.jpg"), join(args.assetsroot, "hr_extra.jpg"))
         else:
-            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
+            psnr, ssim = iqa(join(args.assetsroot,args.name, "sr.jpg"), join(args.assetsroot, "hr.jpg"))
         logger.info(f"P-Oral epoch {epoch+1} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
         # Write result.
         resultsP['p_loss'].append(psnrLoss.cpu().item())
@@ -223,22 +251,23 @@ def main():
         is_best = psnr > best_psnr
         best_psnr = max(psnr, best_psnr)
         
-        if is_best:
-            lastBest = args.max_no_improve
-            print('[ BEST ] Best PSNR model was at epoch {} with best PSNR {}'.format(str(epoch+1),round(best_psnr,2)))
-            bestPSNRepoch = int(epoch)
-            torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
-        else:
-            lastBest -= 1
+        # if is_best:
+        #     lastBest = args.max_no_improve
+        #     print('[ BEST ] Best PSNR model was at epoch {} with best PSNR {}'.format(str(epoch+1),round(best_psnr,2)))
+        #     bestPSNRepoch = int(epoch)
+        #     torch.save(netG.state_dict(), join("weights",args.name, "P-best.pth"))
+        # else:
+        #     lastBest -= 1
 
-        if lastBest == 0:
-            break
+        # used to stop the model from training if there was no improvement for args.max_no_improve epochs
+        # if lastBest == 0:
+        #     break
             
 
     # Save the model weights of the last iteration of the PSNR stage.
     torch.save(netG.state_dict(), join("weights",args.name, "P-last.pth"))
 
-    out_path = 'stats/training'
+    out_path = 'stats/training/'
     data_frame_p = pd.DataFrame(
         data={'Loss PSNR Training': resultsP['p_loss'], 'PSNR Score': resultsP['p_psnr'], 'SSIM Score': resultsP['p_ssim']},
         index=range(1, epochCounter+1))
@@ -262,11 +291,11 @@ def main():
         allLossD,allLossG = train_gan(epoch)
         # Test.
         lrImg = 'lr_' + str(args.scale) + '.jpg'
-        sr(netG, join("assets", lrImg), join("assets",args.name, "sr.jpg"))
+        sr(netG, join(args.assetsroot, lrImg), join(args.assetsroot,args.name, "sr.jpg"))
         if args.scale > 15:
-            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr_extra.jpg"))
+            psnr, ssim = iqa(join(args.assetsroot,args.name, "sr.jpg"), join(args.assetsroot, "hr_extra.jpg"))
         else:
-            psnr, ssim = iqa(join("assets",args.name, "sr.jpg"), join("assets", "hr.jpg"))
+            psnr, ssim = iqa(join(args.assetsroot,args.name, "sr.jpg"), join(args.assetsroot, "hr.jpg"))
         logger.info(f"G-Oral epoch {epoch+1} PSNR: {psnr:.2f}dB SSIM: {ssim:.4f}.")
         # Write result
         resultsG['d_loss'].append(allLossD.cpu().item())
@@ -279,17 +308,17 @@ def main():
         is_best = ssim > best_ssim
         best_ssim = max(ssim, best_ssim)
 
-        if is_best:
-            lastBest = args.max_no_improve
-            print('[ BEST ] Best GAN model was at epoch {} with SSIM {}'.format(str(epoch+1),round(best_ssim,2)))
-            bestGANepoch = int(epoch)
-            torch.save(netD.state_dict(), join("weights",args.name, "D-best.pth"))
-            torch.save(netG.state_dict(), join("weights",args.name, "G-best.pth"))
-        else:
-            lastBest -= 1
+        # if is_best:
+        #     lastBest = args.max_no_improve
+        #     print('[ BEST ] Best GAN model was at epoch {} with SSIM {}'.format(str(epoch+1),round(best_ssim,2)))
+        #     bestGANepoch = int(epoch)
+        #     torch.save(netD.state_dict(), join("weights",args.name, "D-best.pth"))
+        #     torch.save(netG.state_dict(), join("weights",args.name, "G-best.pth"))
+        # else:
+        #     lastBest -= 1
 
-        if lastBest == 0:
-            break
+        # if lastBest == 0:
+        #     break
 
         # Call the scheduler function to adjust the learning rate of the
         # generator model and the discrimination model.
@@ -301,6 +330,7 @@ def main():
     print('[ BEST ] GAN was at epoch {}'.format(bestGANepoch+1))
 
     # Save the model weights of the last iteration of the GAN stage.
+    torch.save(netD.state_dict(), join("weights",args.name, "D-last.pth"))
     torch.save(netG.state_dict(), join("weights",args.name, "G-last.pth"))    
 
     data_frame_g = pd.DataFrame(
@@ -362,9 +392,9 @@ def train_gan(epoch):
         # print('dlossfake:',d_loss_fake)
         # print('dloss:',d_loss)
 
-        # Can remove for different tests
-        with torch.autograd.set_detect_anomaly(True):
-            d_loss.backward()
+        # Can remove for different tests @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        # with torch.autograd.set_detect_anomaly(True):
+        d_loss.backward()
 
         d_optim.step()
 
@@ -460,7 +490,7 @@ def iqa(sr_filename, hr_filename):
 if __name__ == "__main__":
     create_folder("weights")
     create_folder(os.path.join("weights", args.name))
-    create_folder(os.path.join("assets", args.name))
+    create_folder(os.path.join(args.assetsroot, args.name))
     create_folder("stats")
     create_folder("stats/training")
 
