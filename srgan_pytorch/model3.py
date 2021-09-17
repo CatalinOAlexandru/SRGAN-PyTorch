@@ -88,7 +88,7 @@ class Discriminator(nn.Module):
         # which were initially hard coded for 96x96 image size. classfieierAdaption
         # will allow for all kind of image sizes without affecting the training.
         # we divide by 16 based on the architecture numbers and what output is always expected.
-        classifierAdaption = int((imgSize/(16*2))**2) # ** 2 is to not do 6x6 later for each nxmxd
+        classifierAdaption = int((imgSize/16)**2) # ** 2 is to not do 6x6 later for each nxmxd
 
         super(Discriminator, self).__init__()
 
@@ -122,6 +122,12 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, True))
 
+        # EXTRA Layer 4 output: torch.Size([32, 128, 24, 24])
+        self.layer4_extra = nn.Sequential(
+            nn.Conv2d(128, 128, 3, 1, 1, bias=False, padding_mode='reflect'),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True))
+
         # Layer 5 output: torch.Size([32, 256, 24, 24])
         self.layer5 = nn.Sequential(
             nn.Conv2d(128, 256, 3, 1, 1, bias=False),
@@ -134,6 +140,12 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, True))
 
+        # EXTRA Layer 6 output: torch.Size([32, 256, 12, 12])
+        self.layer6_extra = nn.Sequential(
+            nn.Conv2d(256, 256, 3, 1, 1, bias=False, padding_mode='reflect'),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, True))
+
         # Layer 7 output: torch.Size([32, 512, 12, 12])
         self.layer7 = nn.Sequential(
             nn.Conv2d(256, 512, 3, 1, 1, bias=False),
@@ -143,6 +155,12 @@ class Discriminator(nn.Module):
         # Layer 8 output: torch.Size([32, 512, 6, 6])
         self.layer8 = nn.Sequential(
             nn.Conv2d(512, 512, 3, 2, 1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, True))
+
+        # EXTRA Layer 8 output: torch.Size([32, 512, 6, 6])
+        self.layer8_extra = nn.Sequential(
+            nn.Conv2d(512, 512, 3, 1, 1, bias=False, padding_mode='reflect'),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, True))
 
@@ -160,7 +178,7 @@ class Discriminator(nn.Module):
 
 
         self.classifier = nn.Sequential(
-            nn.Linear(1024 * classifierAdaption, 1024),
+            nn.Linear(512 * classifierAdaption, 1024),
             nn.LeakyReLU(0.2, True),
             nn.Linear(1024, 1),
             nn.Sigmoid()
@@ -173,44 +191,52 @@ class Discriminator(nn.Module):
         print(grad)
 
     def forward(self, x):
-        print('Discriminator input',x.shape)
+        # print('Discriminator input',x.shape)
 
         # out = self.features(x)
         # print('Discriminator after features',out.shape)
 
         out = self.layer1(x)
-        print('Layer 1 output:',out.shape)
+        # print('Layer 1 output:',out.shape)
 
-        out = self.layer2(out) # can loop
-        print('Layer 2 output:',out.shape)
+        out = self.layer2(out)
+        # print('Layer 2 output:',out.shape)
 
-        out = self.layer2_extra(out) # can loop
-        print('Layer 2 EXTRA output:',out.shape)
-
-        # out.register_hook(printGrad)
+        out = self.layer2_extra(out)
+        # print('Layer 2 EXTRA output:',out.shape)
 
         out = self.layer3(out)
-        print('Layer 3 output:',out.shape)
+        # print('Layer 3 output:',out.shape)
 
-        out = self.layer4(out) # can loop
-        print('Layer 4 output:',out.shape)
+        out = self.layer4(out)
+        # print('Layer 4 output:',out.shape)
+
+        out = self.layer4_extra(out)
+        # print('Layer 4 EXTRA output:',out.shape)
 
         out = self.layer5(out)
-        print('Layer 5 output:',out.shape)
+        # print('Layer 5 output:',out.shape)
 
-        out = self.layer6(out) # can loop
-        print('Layer 6 output:',out.shape)
+        out = self.layer6(out)
+        # print('Layer 6 output:',out.shape)
+
+        out = self.layer6_extra(out)
+        # print('Layer 6 EXTRA output:',out.shape)
 
         out = self.layer7(out)
-        print('Layer 7 output:',out.shape)
+        # print('Layer 7 output:',out.shape)
 
-        out = self.layer8(out) # can loop
-        print('Layer 8 output:',out.shape)
+        out = self.layer8(out)
+        # print('Layer 8 output:',out.shape)
+
+        out = self.layer8_extra(out)
+        # print('Layer 8 EXTRA output:',out.shape)
 
         out = torch.flatten(out, 1)
-        print('Discriminator after flatten',out.shape)
+        # print('Discriminator after flatten',out.shape)
+
         out = self.classifier(out)
-        print('Discriminator after classifier',out.shape)
+        # print('Discriminator after classifier',out.shape)
 
         return out
 
