@@ -52,9 +52,9 @@ logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO)
 parserTest = ArgumentParser()
 parserTest.add_argument("--pretrained", dest="pretrained", action="store_true", help="Use pre-trained model.")
 parserTest.add_argument("--model-path", default="", type=str, help="Path to latest checkpoint for model.")
-parserTest.add_argument("--model-type", default="model3", type=str, help="Which model file to use. Default: model3")
+parserTest.add_argument("--model-type", default="model2", type=str, help="Which model file to use. Default: model3")
 # parserTest.add_argument("--test-path-lr", default="data/Set14/LRbicx4", type=str, help="Path to test images")
-parserTest.add_argument("--test-path-hr", default="data/Set14/GTmod12", type=str, help="Path to test images")
+parserTest.add_argument("--test-path-hr", default="/home/calexand/datasets/histo_split_4/cropTarget", type=str, help="Path to test images")
 parserTest.add_argument("--scale-factor", default=4, type=int, help="Scale Factor for image")
 parserTest.add_argument("--max-images", default=None, type=int, help="Only run testing on N amount of images instead of the entire test folder.")
 parserTest.add_argument("--num-resBlocks", default=16, type=int, help="Number of Residual Blocks blocks used in the model. Default: 16 as in the paper.")
@@ -63,14 +63,12 @@ parserTest.add_argument("--name", default="DEF", type=str, help="Name for test f
 parserTest.add_argument("--cuda", dest="cuda", action="store_true", help="Enables cuda.")
 args = parserTest.parse_args()
 
-if args.model_type == 'model3':
-    from srgan_pytorch.model3 import Generator
-elif args.model_type == 'model2':
+if args.model_type == 'model2' or args.model_type == 'model3' or args.model_type == 'model32':
     from srgan_pytorch.model2 import Generator
 elif args.model_type == 'model1':
     from srgan_pytorch.model1 import Generator
 else:
-    print('Model selected is not available. Use "model1", "model2" or "model3".')
+    print('Model selected is not available. Use "model1", "model2", "model3" or "model32".')
     sys.exit()
 
 # Set whether to use CUDA.
@@ -108,7 +106,9 @@ def sr(model, hr_filename, sr_filename, cropSize):
                 # upImg = torch.nn.functional.pad(upImg,pad=(4,4,4,4), mode='constant', value=0)
                 # print(upImg.shape)
                 
-                imgTensor[:,i:i+cropSize,j:j+cropSize] = upImg[0]
+                try:
+                    imgTensor[:,i:i+cropSize,j:j+cropSize] = upImg[0]
+                
         end = time.time()
         logger.info(f"It took {round(end - start,2)} seconds to process {patches} patches into the SR image.")
         save_image(imgTensor, sr_filename, normalize=True)
@@ -291,13 +291,14 @@ def main():
     avg_ssim = sum(resultScores['ssim']) / len(resultScores['ssim'])
     avg_percepSim = sum(resultScores['perpSimi']) / len(resultScores['perpSimi'])
 
-    logger.info(f"Mean Average PSNR: {avg_psnr:.2f}dB.")
-    logger.info(f"Mean Average SSIM: {avg_ssim:.4f}.")
-    logger.info(f"Mean Average Perceptual Similarity: {avg_percepSim:.4f}.")
+    logger.info(f"Mean Average PSNR: {str(round(avg_psnr,2))}")
+    logger.info(f"Mean Average SSIM: {str(round(avg_ssim,4))}")
+    logger.info(f"Mean Average Perceptual Similarity: {str(round(avg_percepSim,4))}")
+    logger.info(f"PSNR Best / Worst: {str(round(np.max(resultScores['psnr']),2))} / {str(round(np.min(resultScores['psnr']),2))}")
+    logger.info(f"SSIM Best / Worst: {str(round(np.max(resultScores['ssim']),2))} / {str(round(np.min(resultScores['ssim']),2))}")
+    logger.info(f"PercepSim Best/Worst: {str(round(np.min(resultScores['perpSimi']),3))} / {str(round(np.max(resultScores['perpSimi']),3))}")
 
-    logger.info(f"PSNR Best / Worst: {np.max(resultScores['psnr']):.2f} / {np.min(resultScores['psnr']):.2f}")
-    logger.info(f"SSIM Best / Worst: {np.max(resultScores['ssim']):.2f} / {np.min(resultScores['ssim']):.2f}")
-    logger.info(f"PercepSim Best/Worst: {np.min(resultScores['perpSimi']):.3f} / {np.max(resultScores['perpSimi']):.3f}")
+
 
 
     out_path = 'stats/testing'
