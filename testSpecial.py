@@ -288,7 +288,7 @@ def main():
     model8.load_state_dict(torch.load('/home/calexand/calexand/SRGAN-PyTorch/weights/BreTest3_x8_128/G-last.pth'))
 
 
-    # loss_fn_alex = lpips.LPIPS(net='alex') # best forward scores
+    # loss_fn_alex = lpips.LPIPS(net='vgg') # best forward scores
 
     # Get test image file index.
     filenames = os.listdir('/home/calexand/datasets/histo_split_4/cropTarget')

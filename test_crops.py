@@ -250,7 +250,7 @@ def main():
         logger.info(f"Loading weights from `{args.model_path}`.")
         model.load_state_dict(torch.load(args.model_path))
 
-    loss_fn_alex = lpips.LPIPS(net='alex') # best forward scores
+    loss_fn_alex = lpips.LPIPS(net='vgg') # best forward scores
 
     # Get test image file index.
     filenames = os.listdir(os.path.join(args.test_path_hr))
